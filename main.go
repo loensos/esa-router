@@ -34,10 +34,13 @@ type Route struct {
 
 // DynamicRoute 动态路由 (支持端口提取)
 type DynamicRoute struct {
-	Pattern  string      // 例如: /node-*
-	Backend  string      // 例如: 127.0.0.1:<port>
+	Pattern  string       // 例如: /node-*
+	Backend  string       // 例如: 127.0.0.1:<port>
 	Regex    *regexp.Regexp
-	Extract  int         // 捕获组索引
+	Extract  int          // 捕获组索引
+	IsRange  bool         // 是否是范围模式
+	MinPort  int          // 最小端口
+	MaxPort  int          // 最大端口
 }
 
 var (
@@ -164,14 +167,39 @@ func isDynamicPattern(path string) bool {
 // compile 编译动态路由的正则
 func (d *DynamicRoute) compile() error {
 	// 转换模式为正则
-	// /node-* → ^/node-(\d+)$
-	// /node-2001-3000 → ^/node-(\d+)$ (范围检查在匹配时处理)
+	// /node-* → ^/node-(\\d+)$
+	// /node-2001-3000 → ^/node-(\\d+)$ (范围检查在匹配时处理)
 	
 	pattern := d.Pattern
-	// 转义特殊字符
-	pattern = regexp.QuoteMeta(pattern)
-	// 将 * 替换为捕获组
-	pattern = regexp.MustCompile(`\\?\\\*`).ReplaceAllString(pattern, `(\d+)`)
+	
+	// 检查是否是范围模式: /node-20001-30000
+	if bytes.Contains([]byte(pattern), []byte("-")) {
+		parts := bytes.Split([]byte(pattern), []byte("-"))
+		if len(parts) >= 3 {
+			last := string(parts[len(parts)-1])
+			secondLast := string(parts[len(parts)-2])
+			// 检查最后两部分是否是数字 (范围模式)
+			if _, err1 := strconv.Atoi(last); err1 == nil {
+				if _, err2 := strconv.Atoi(secondLast); err2 == nil {
+					// 范围模式: /node-20001-30000 → ^/node-(\d+)$
+					prefix := pattern[:len(pattern)-len(secondLast)-1-len(last)]
+					pattern = regexp.QuoteMeta(prefix) + `(\d+)`
+					d.IsRange = true
+					d.MinPort, _ = strconv.Atoi(secondLast)
+					d.MaxPort, _ = strconv.Atoi(last)
+				}
+			}
+		}
+	}
+	
+	// 如果不是范围模式，按原逻辑处理
+	if !d.IsRange {
+		// 转义特殊字符
+		pattern = regexp.QuoteMeta(pattern)
+		// 将 * 替换为捕获组
+		pattern = regexp.MustCompile(`\\\\?\\\\\\*`).ReplaceAllString(pattern, `(\\d+)`)
+	}
+	
 	// 添加锚点
 	pattern = "^" + pattern + "$"
 	
@@ -240,10 +268,21 @@ func findRoute(path string) (string, bool) {
 		}
 	}
 	
-	// 再尝试动态路由
+	// 再尝试范围匹配 (优先于通配符)
 	for i := range dynRoutes {
-		if backend, ok := dynRoutes[i].matchDynamic(path); ok {
-			return backend, true
+		if dynRoutes[i].IsRange {
+			if backend, ok := dynRoutes[i].matchDynamic(path); ok {
+				return backend, true
+			}
+		}
+	}
+	
+	// 最后尝试通配符匹配
+	for i := range dynRoutes {
+		if !dynRoutes[i].IsRange {
+			if backend, ok := dynRoutes[i].matchDynamic(path); ok {
+				return backend, true
+			}
 		}
 	}
 	
