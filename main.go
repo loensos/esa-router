@@ -12,8 +12,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	"github.com/BurntSushi/toml"
 )
 
 const (
@@ -22,16 +20,12 @@ const (
 	connectTO   = 10 * time.Second
 	idleTO      = 300 * time.Second
 	writeTO     = 30 * time.Second
+	acceptTO    = 500 * time.Millisecond
 )
 
 type Route struct {
 	Path    string
 	Backend string
-}
-
-type Config struct {
-	ListenPort int              `toml:"listen_port"`
-	Routers    map[string]string `toml:"routers"`
 }
 
 var (
@@ -41,23 +35,40 @@ var (
 )
 
 func loadConfig() error {
-	var cfg Config
-	if _, err := toml.DecodeFile(configPath, &cfg); err != nil {
-		return fmt.Errorf("decode config: %w", err)
-	}
-
-	if cfg.ListenPort > 0 {
-		listenPort = cfg.ListenPort
-	} else {
-		listenPort = defaultPort
-	}
-
 	routes = nil
-	for path, backend := range cfg.Routers {
-		routes = append(routes, Route{Path: path, Backend: backend})
-	}
+	listenPort = defaultPort
 
-	return nil
+	f, err := os.Open(configPath)
+	if err != nil {
+		return fmt.Errorf("open config: %w", err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 || bytes.HasPrefix(line, []byte("//")) || bytes.HasPrefix(line, []byte("#")) {
+			continue
+		}
+		// 解析 listen = ":1234" 或 listen = ":1234"
+		if bytes.HasPrefix(line, []byte("listen")) {
+			parts := bytes.Fields(line)
+			if len(parts) >= 3 && bytes.Equal(parts[1], []byte("=")) {
+				addr := string(bytes.TrimSpace(parts[2]))
+				addr = string(bytes.Trim([]byte(addr), `"'`))
+				if len(addr) > 0 && addr[0] == ':' {
+					fmt.Sscanf(addr[1:], "%d", &listenPort)
+				}
+			}
+			continue
+		}
+		// 解析路由行: path backend
+		parts := bytes.Fields(line)
+		if len(parts) >= 2 {
+			routes = append(routes, Route{Path: string(parts[0]), Backend: string(parts[1])})
+		}
+	}
+	return scanner.Err()
 }
 
 func findRoute(path string) *Route {
@@ -210,15 +221,19 @@ func main() {
 		}
 	}()
 
+	// 类型断言获取 TCPListener，用于设置 deadline
+	tcpLn, ok := ln.(*net.TCPListener)
+	if !ok {
+		log.Fatal("Listener must be TCP")
+	}
+
+	// 主循环：设置 deadline 让 Accept 定期返回，快速响应信号
 	for {
+		tcpLn.SetDeadline(time.Now().Add(acceptTO))
 		conn, err := ln.Accept()
 		if err != nil {
-			select {
-			case <-sigCh:
-				return
-			default:
-				continue
-			}
+			// 超时或关闭，继续
+			continue
 		}
 		go handle(conn)
 	}
