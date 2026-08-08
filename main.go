@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -20,7 +21,7 @@ const (
 	connectTO   = 10 * time.Second
 	idleTO      = 300 * time.Second
 	writeTO     = 30 * time.Second
-	acceptTO    = 500 * time.Millisecond
+	acceptTO    = 100 * time.Millisecond
 )
 
 type Route struct {
@@ -32,6 +33,7 @@ var (
 	configPath string
 	listenPort int
 	routes     []Route
+	shutdown   atomic.Bool
 )
 
 func loadConfig() error {
@@ -45,13 +47,36 @@ func loadConfig() error {
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
+	inRouters := false
+
 	for scanner.Scan() {
 		line := bytes.TrimSpace(scanner.Bytes())
 		if len(line) == 0 || bytes.HasPrefix(line, []byte("//")) || bytes.HasPrefix(line, []byte("#")) {
 			continue
 		}
-		// 解析 listen = ":1234" 或 listen = ":1234"
-		if bytes.HasPrefix(line, []byte("listen")) {
+
+		// 检测 [routers] 节
+		if bytes.Equal(line, []byte("[routers]")) {
+			inRouters = true
+			continue
+		}
+		// 检测到新节则退出
+		if bytes.HasPrefix(line, []byte("[")) && bytes.HasSuffix(line, []byte("]")) {
+			inRouters = false
+			continue
+		}
+
+		// 解析 listen_port = 1000
+		if !inRouters && bytes.HasPrefix(line, []byte("listen_port")) {
+			parts := bytes.Fields(line)
+			if len(parts) >= 3 && bytes.Equal(parts[1], []byte("=")) {
+				fmt.Sscanf(string(parts[2]), "%d", &listenPort)
+			}
+			continue
+		}
+
+		// 解析 listen = ":1000" (旧格式)
+		if !inRouters && bytes.HasPrefix(line, []byte("listen")) {
 			parts := bytes.Fields(line)
 			if len(parts) >= 3 && bytes.Equal(parts[1], []byte("=")) {
 				addr := string(bytes.TrimSpace(parts[2]))
@@ -62,9 +87,23 @@ func loadConfig() error {
 			}
 			continue
 		}
-		// 解析路由行: path backend
+
+		// 解析路由 (新格式: "/path" = "backend")
+		if inRouters && bytes.Contains(line, []byte("=")) {
+			parts := bytes.Fields(line)
+			if len(parts) >= 3 && bytes.Equal(parts[1], []byte("=")) {
+				path := string(bytes.Trim(parts[0], `"`))
+				backend := string(bytes.Trim(parts[2], `"`))
+				if path != "" && backend != "" {
+					routes = append(routes, Route{Path: path, Backend: backend})
+				}
+			}
+			continue
+		}
+
+		// 解析路由 (旧格式: path backend)
 		parts := bytes.Fields(line)
-		if len(parts) >= 2 {
+		if len(parts) >= 2 && !inRouters {
 			routes = append(routes, Route{Path: string(parts[0]), Backend: string(parts[1])})
 		}
 	}
@@ -216,23 +255,25 @@ func main() {
 				continue
 			}
 			log.Println("Shutting down...")
+			shutdown.Store(true)
 			ln.Close()
 			return
 		}
 	}()
 
-	// 类型断言获取 TCPListener，用于设置 deadline
 	tcpLn, ok := ln.(*net.TCPListener)
 	if !ok {
 		log.Fatal("Listener must be TCP")
 	}
 
-	// 主循环：设置 deadline 让 Accept 定期返回，快速响应信号
 	for {
 		tcpLn.SetDeadline(time.Now().Add(acceptTO))
 		conn, err := ln.Accept()
 		if err != nil {
-			// 超时或关闭，继续
+			if shutdown.Load() {
+				log.Println("Shutdown complete")
+				return
+			}
 			continue
 		}
 		go handle(conn)

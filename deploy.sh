@@ -82,91 +82,104 @@ fi
 mkdir -p "$CONFIG_DIR"
 CONFIG_FILE="$CONFIG_DIR/config.toml"
 
-# 配置路由
-if $INTERACTIVE; then
+# 配置路由（检查是否已存在）
+if [ -f "$CONFIG_FILE" ]; then
+    echo "   配置已存在，跳过创建"
+    echo ""
+    echo "当前配置:"
+    cat "$CONFIG_FILE" | sed 's/^/   /'
+    echo ""
+    # 读取现有配置的路由数
+    route_count=$(grep -E '^\s*"/' "$CONFIG_FILE" | wc -l)
+    if [ "$route_count" -eq 0 ]; then
+        route_count=$(grep -E '^[^#]' "$CONFIG_FILE" | grep -v "listen" | grep -v "^$" | grep -v "^\[" | grep -v "=" | wc -l)
+    fi
+    listen_port=$(grep -E '^listen' "$CONFIG_FILE" | sed 's/.*:\([0-9]*\)".*/\1/' || echo "1000")
+else
     echo ""
     echo "=== 配置 ESA Router ==="
     echo ""
     
-    # 监听端口
-    read -p "监听端口 [1000]: " listen_port
-    listen_port=${listen_port:-1000}
-    
-    # 路由配置
-    echo ""
-    echo "添加路由 (格式: /路径 = ip:端口)"
-    echo "例如: /ws-us = 127.0.0.1:2000"
-    echo "输入空行结束添加"
-    echo ""
-    
-    route_count=0
-    while true; do
-        read -p "路由 $((route_count + 1)) (路径=后端): " route_input
+    if $INTERACTIVE; then
+        # 监听端口
+        read -p "监听端口 [1000]: " listen_port
+        listen_port=${listen_port:-1000}
         
-        # 空行结束
-        if [ -z "$route_input" ]; then
-            break
-        fi
+        # 路由配置
+        echo ""
+        echo "添加路由 (格式: /路径 = ip:端口)"
+        echo "例如: /ws-us = 127.0.0.1:2000"
+        echo "输入空行结束添加"
+        echo ""
         
-        # 解析路径和后端
-        path=$(echo "$route_input" | cut -d'=' -f1 | tr -d ' ')
-        backend=$(echo "$route_input" | cut -d'=' -f2 | tr -d ' ')
-        
-        if [ -z "$path" ] || [ -z "$backend" ]; then
-            echo "   格式错误，跳过"
-            continue
-        fi
-        
-        echo "  \"$path\" = \"$backend\"" >> "$CONFIG_FILE"
-        route_count=$((route_count + 1))
-    done
-    
-    if [ $route_count -eq 0 ]; then
-        echo "  未配置路由，使用默认示例"
-        echo '  "/ws-us" = "127.0.0.1:2000"' >> "$CONFIG_FILE"
-        echo '  "/ws-sg" = "127.0.0.1:2001"' >> "$CONFIG_FILE"
-        route_count=2
-    fi
-else
-    # 非交互模式，使用环境变量或默认值
-    listen_port="${LISTEN_PORT:-1000}"
-    route_count=0
-    
-    # 清空配置
-    > "$CONFIG_FILE"
-    echo "listen_port = $listen_port" >> "$CONFIG_FILE"
-    echo "" >> "$CONFIG_FILE"
-    echo "[routers]" >> "$CONFIG_FILE"
-    
-    # 从环境变量读取路由，格式: ROUTES="/ws-us=127.0.0.1:2000,/ws-sg=127.0.0.1:2001"
-    if [ -n "$ROUTES" ]; then
-        IFS=',' read -ra ROUTE_ARRAY <<< "$ROUTES"
-        for route in "${ROUTE_ARRAY[@]}"; do
-            path=$(echo "$route" | cut -d'=' -f1)
-            backend=$(echo "$route" | cut -d'=' -f2)
-            if [ -n "$path" ] && [ -n "$backend" ]; then
-                echo "  \"$path\" = \"$backend\"" >> "$CONFIG_FILE"
-                route_count=$((route_count + 1))
+        route_count=0
+        while true; do
+            read -p "路由 $((route_count + 1)) (路径=后端): " route_input
+            
+            # 空行结束
+            if [ -z "$route_input" ]; then
+                break
             fi
+            
+            # 解析路径和后端
+            path=$(echo "$route_input" | cut -d'=' -f1 | tr -d ' ')
+            backend=$(echo "$route_input" | cut -d'=' -f2 | tr -d ' ')
+            
+            if [ -z "$path" ] || [ -z "$backend" ]; then
+                echo "   格式错误，跳过"
+                continue
+            fi
+            
+            echo "  \"$path\" = \"$backend\"" >> "$CONFIG_FILE"
+            route_count=$((route_count + 1))
         done
-    fi
-    
-    # 默认路由
-    if [ $route_count -eq 0 ]; then
-        echo "  /ws-us -> 127.0.0.1:2000 (default)"
-        echo "  /ws-sg -> 127.0.0.1:2001 (default)"
-        echo '  "/ws-us" = "127.0.0.1:2000"' >> "$CONFIG_FILE"
-        echo '  "/ws-sg" = "127.0.0.1:2001"' >> "$CONFIG_FILE"
-        route_count=2
-    fi
-fi
+        
+        if [ $route_count -eq 0 ]; then
+            echo "  未配置路由，使用默认示例"
+            echo '  "/ws-us" = "127.0.0.1:2000"' >> "$CONFIG_FILE"
+            echo '  "/ws-sg" = "127.0.0.1:2001"' >> "$CONFIG_FILE"
+            route_count=2
+        fi
+        echo "配置已保存到: $CONFIG_FILE"
+    else
+        # 非交互模式
+        listen_port="${LISTEN_PORT:-1000}"
+        route_count=0
+        
+        # 创建配置（新格式）
+        cat > "$CONFIG_FILE" << EOF
+# ESA Router 配置
+# 监听端口
+listen_port = $listen_port
 
-echo ""
-echo "配置已保存到: $CONFIG_FILE"
-echo ""
-echo "当前配置:"
-cat "$CONFIG_FILE" | sed 's/^/   /'
-echo ""
+# 路由列表
+[routers]
+EOF
+
+        # 从环境变量读取路由
+        if [ -n "$ROUTES" ]; then
+            IFS=',' read -ra ROUTE_ARRAY <<< "$ROUTES"
+            for route in "${ROUTE_ARRAY[@]}"; do
+                path=$(echo "$route" | cut -d'=' -f1)
+                backend=$(echo "$route" | cut -d'=' -f2)
+                if [ -n "$path" ] && [ -n "$backend" ]; then
+                    echo "  \"$path\" = \"$backend\"" >> "$CONFIG_FILE"
+                    route_count=$((route_count + 1))
+                fi
+            done
+        fi
+
+        # 默认路由
+        if [ $route_count -eq 0 ]; then
+            echo "  未指定路由，使用默认示例"
+            echo '  "/ws-us" = "127.0.0.1:2000"' >> "$CONFIG_FILE"
+            echo '  "/ws-sg" = "127.0.0.1:2001"' >> "$CONFIG_FILE"
+            route_count=2
+        fi
+        echo "配置已保存到: $CONFIG_FILE"
+    fi
+    echo ""
+fi
 
 # 安装systemd服务
 echo "3. 安装systemd服务"
