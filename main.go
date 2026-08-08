@@ -219,6 +219,11 @@ func (d *DynamicRoute) matchDynamic(path string) (string, bool) {
 		}
 	}
 	
+	// 防止路由到自身端口 (循环保护)
+	if port == listenPort {
+		return "", false
+	}
+	
 	// 替换后端中的 <port> 或 * 为实际端口
 	backend := d.Backend
 	backend = regexp.MustCompile(`<port>`).ReplaceAllString(backend, portStr)
