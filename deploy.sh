@@ -5,7 +5,7 @@
 
 set -e
 
-VERSION="1.1"
+VERSION="1.2"
 REPO="loensos/esa-router"
 INSTALL_DIR="/opt/esa-router"
 CONFIG_DIR="/etc/esa-router"
@@ -133,6 +133,7 @@ case "$choice" in
                 
                 echo "添加路由 (格式: /路径 = ip:端口)"
                 echo "例如: /ws-us = 127.0.0.1:2000"
+                echo "动态路由: /node-* = 127.0.0.1:<port>"
                 echo "输入空行结束添加"
                 echo ""
                 
@@ -154,7 +155,7 @@ case "$choice" in
                 
                 if [ $route_count -eq 0 ]; then
                     echo '  "/ws-us" = "127.0.0.1:2000"' >> "$CONFIG_FILE"
-                    echo '  "/ws-sg" = "127.0.0.1:2001"' >> "$CONFIG_FILE"
+                    echo '  "/node-*" = "127.0.0.1:<port>"' >> "$CONFIG_FILE"
                     route_count=2
                 fi
             else
@@ -185,7 +186,7 @@ EOF
                 
                 if [ $route_count -eq 0 ]; then
                     echo '  "/ws-us" = "127.0.0.1:2000"' >> "$CONFIG_FILE"
-                    echo '  "/ws-sg" = "127.0.0.1:2001"' >> "$CONFIG_FILE"
+                    echo '  "/node-*" = "127.0.0.1:<port>"' >> "$CONFIG_FILE"
                     route_count=2
                 fi
             fi

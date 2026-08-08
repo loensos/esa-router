@@ -9,6 +9,8 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"regexp"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -24,20 +26,34 @@ const (
 	acceptTO    = 100 * time.Millisecond
 )
 
+// Route 静态路由
 type Route struct {
 	Path    string
 	Backend string
+}
+
+// DynamicRoute 动态路由 (支持端口提取)
+type DynamicRoute struct {
+	Pattern  string      // 例如: /node-*
+	Backend  string      // 例如: 127.0.0.1:<port>
+	Regex    *regexp.Regexp
+	Extract  int         // 捕获组索引
 }
 
 var (
 	configPath string
 	listenPort int
 	routes     []Route
+	dynRoutes  []DynamicRoute
 	shutdown   atomic.Bool
 )
 
+// 动态端口正则: 匹配 /node-2001, /ws-3000 等
+var portExtractRegex = regexp.MustCompile(`([a-zA-Z_-]+)(\d+)`)
+
 func loadConfig() error {
 	routes = nil
+	dynRoutes = nil
 	listenPort = defaultPort
 
 	f, err := os.Open(configPath)
@@ -88,14 +104,29 @@ func loadConfig() error {
 			continue
 		}
 
-		// 解析路由 (新格式: "/path" = "backend")
+		// 解析路由
 		if inRouters && bytes.Contains(line, []byte("=")) {
 			parts := bytes.Fields(line)
 			if len(parts) >= 3 && bytes.Equal(parts[1], []byte("=")) {
 				path := string(bytes.Trim(parts[0], `"`))
 				backend := string(bytes.Trim(parts[2], `"`))
 				if path != "" && backend != "" {
-					routes = append(routes, Route{Path: path, Backend: backend})
+					// 检测是否为动态路由 (包含 * 或 -数字-数字 模式)
+					if bytes.Contains([]byte(path), []byte("*")) || isDynamicPattern(path) {
+						// 动态路由
+						dyn := DynamicRoute{
+							Pattern: path,
+							Backend: backend,
+						}
+						if err := dyn.compile(); err != nil {
+							log.Printf("  Warning: Invalid dynamic pattern %s: %v", path, err)
+							continue
+						}
+						dynRoutes = append(dynRoutes, dyn)
+					} else {
+						// 静态路由
+						routes = append(routes, Route{Path: path, Backend: backend})
+					}
 				}
 			}
 			continue
@@ -110,13 +141,104 @@ func loadConfig() error {
 	return scanner.Err()
 }
 
-func findRoute(path string) *Route {
-	for i := range routes {
-		if bytes.HasPrefix([]byte(path), []byte(routes[i].Path)) {
-			return &routes[i]
+// isDynamicPattern 检测是否为动态路由模式
+func isDynamicPattern(path string) bool {
+	// 检查是否包含 *
+	if bytes.Contains([]byte(path), []byte("*")) {
+		return true
+	}
+	// 检查是否包含 -数字-数字 范围模式
+	if bytes.Contains([]byte(path), []byte("-")) {
+		// 例如: /node-2001-3000
+		parts := bytes.Split([]byte(path), []byte("-"))
+		if len(parts) >= 3 {
+			last := string(parts[len(parts)-1])
+			if _, err := strconv.Atoi(last); err == nil {
+				return true
+			}
 		}
 	}
+	return false
+}
+
+// compile 编译动态路由的正则
+func (d *DynamicRoute) compile() error {
+	// 转换模式为正则
+	// /node-* → ^/node-(\d+)$
+	// /node-2001-3000 → ^/node-(\d+)$ (范围检查在匹配时处理)
+	
+	pattern := d.Pattern
+	// 转义特殊字符
+	pattern = regexp.QuoteMeta(pattern)
+	// 将 * 替换为捕获组
+	pattern = regexp.MustCompile(`\\?\\\*`).ReplaceAllString(pattern, `(\d+)`)
+	// 添加锚点
+	pattern = "^" + pattern + "$"
+	
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return err
+	}
+	
+	d.Regex = re
+	d.Extract = 1 // 第一个捕获组是端口
 	return nil
+}
+
+// matchDynamic 尝试匹配动态路由并返回后端地址
+func (d *DynamicRoute) matchDynamic(path string) (string, bool) {
+	if d.Regex == nil {
+		return "", false
+	}
+	
+	matches := d.Regex.FindStringSubmatch(path)
+	if len(matches) < 2 {
+		return "", false
+	}
+	
+	portStr := matches[d.Extract]
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return "", false
+	}
+	
+	// 检查范围
+	if bytes.Contains([]byte(d.Pattern), []byte("-")) {
+		parts := bytes.Split([]byte(d.Pattern), []byte("-"))
+		if len(parts) >= 3 {
+			last := string(parts[len(parts)-1])
+			if maxPort, err := strconv.Atoi(last); err == nil {
+				if port < 1 || port > maxPort {
+					return "", false
+				}
+			}
+		}
+	}
+	
+	// 替换后端中的 <port> 或 * 为实际端口
+	backend := d.Backend
+	backend = regexp.MustCompile(`<port>`).ReplaceAllString(backend, portStr)
+	backend = regexp.MustCompile(`\*`).ReplaceAllString(backend, portStr)
+	
+	return backend, true
+}
+
+func findRoute(path string) (string, bool) {
+	// 先尝试静态路由
+	for i := range routes {
+		if bytes.HasPrefix([]byte(path), []byte(routes[i].Path)) {
+			return routes[i].Backend, true
+		}
+	}
+	
+	// 再尝试动态路由
+	for i := range dynRoutes {
+		if backend, ok := dynRoutes[i].matchDynamic(path); ok {
+			return backend, true
+		}
+	}
+	
+	return "", false
 }
 
 func copyConn(src, dst net.Conn, name string, done chan<- error) {
@@ -174,15 +296,15 @@ func handle(conn net.Conn) {
 		path = string(pathBytes[:q])
 	}
 
-	route := findRoute(path)
-	if route == nil {
+	backend, ok := findRoute(path)
+	if !ok {
 		log.Printf("Unknown path: %s", path)
 		return
 	}
 
-	log.Printf("%s -> %s", path, route.Backend)
+	log.Printf("%s -> %s", path, backend)
 
-	target, err := net.DialTimeout("tcp", route.Backend, connectTO)
+	target, err := net.DialTimeout("tcp", backend, connectTO)
 	if err != nil {
 		log.Printf("Backend error: %v", err)
 		return
@@ -225,7 +347,7 @@ func main() {
 		log.Fatalf("Load config failed: %v", err)
 	}
 
-	log.Printf("Loaded %d routes from %s", len(routes), configPath)
+	log.Printf("Loaded %d static routes, %d dynamic routes from %s", len(routes), len(dynRoutes), configPath)
 
 	// 启动监听
 	addr := fmt.Sprintf(":%d", listenPort)
@@ -235,7 +357,10 @@ func main() {
 	}
 	log.Printf("Listening on %s", addr)
 	for _, r := range routes {
-		log.Printf("  %s -> %s", r.Path, r.Backend)
+		log.Printf("  %s -> %s (static)", r.Path, r.Backend)
+	}
+	for _, r := range dynRoutes {
+		log.Printf("  %s -> %s (dynamic)", r.Pattern, r.Backend)
 	}
 
 	// 启动信号处理
@@ -255,9 +380,12 @@ func main() {
 					log.Printf("Reload failed: %v", err)
 					continue
 				}
-				log.Printf("Reloaded %d routes", len(routes))
+				log.Printf("Reloaded %d static, %d dynamic routes", len(routes), len(dynRoutes))
 				for _, r := range routes {
-					log.Printf("  %s -> %s", r.Path, r.Backend)
+					log.Printf("  %s -> %s (static)", r.Path, r.Backend)
+				}
+				for _, r := range dynRoutes {
+					log.Printf("  %s -> %s (dynamic)", r.Pattern, r.Backend)
 				}
 				// 检查端口是否变化
 				newAddr := fmt.Sprintf(":%d", listenPort)
