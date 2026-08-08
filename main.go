@@ -105,7 +105,7 @@ func handle(conn net.Conn) {
 	}
 
 	firstLine := header.Bytes()
-	idx := bytes.Index(firstLine, []byte("\\r\n"))
+	idx := bytes.Index(firstLine, []byte("\r\n"))
 	if idx < 0 {
 		return
 	}
