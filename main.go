@@ -220,25 +220,32 @@ func main() {
 		configPath = args[0]
 	}
 
+	// 初始加载
 	if err := loadConfig(); err != nil {
 		log.Fatalf("Load config failed: %v", err)
 	}
 
 	log.Printf("Loaded %d routes from %s", len(routes), configPath)
 
+	// 启动监听
 	addr := fmt.Sprintf(":%d", listenPort)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Fatalf("Listen: %v", err)
 	}
-
 	log.Printf("Listening on %s", addr)
 	for _, r := range routes {
 		log.Printf("  %s -> %s", r.Path, r.Backend)
 	}
 
+	// 启动信号处理
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+
+	tcpLn, ok := ln.(*net.TCPListener)
+	if !ok {
+		log.Fatal("Listener must be TCP")
+	}
 
 	go func() {
 		for sig := range sigCh {
@@ -252,6 +259,19 @@ func main() {
 				for _, r := range routes {
 					log.Printf("  %s -> %s", r.Path, r.Backend)
 				}
+				// 检查端口是否变化
+				newAddr := fmt.Sprintf(":%d", listenPort)
+				if newAddr != addr {
+					log.Printf("Port changed: %s -> %s, restarting...", addr, newAddr)
+					ln.Close()
+					ln, err = net.Listen("tcp", newAddr)
+					if err != nil {
+						log.Fatalf("Listen %s: %v", newAddr, err)
+					}
+					tcpLn = ln.(*net.TCPListener)
+					addr = newAddr
+					log.Printf("Listening on %s", addr)
+				}
 				continue
 			}
 			log.Println("Shutting down...")
@@ -261,11 +281,7 @@ func main() {
 		}
 	}()
 
-	tcpLn, ok := ln.(*net.TCPListener)
-	if !ok {
-		log.Fatal("Listener must be TCP")
-	}
-
+	// 主循环
 	for {
 		tcpLn.SetDeadline(time.Now().Add(acceptTO))
 		conn, err := ln.Accept()
