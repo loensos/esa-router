@@ -1,17 +1,17 @@
-# ESA Router v1.2
+# ESA Router v1.3
 
-WebSocket Path 路由器：按路径动态路由到不同后端
+WebSocket Path 路由器：按路径动态路由到不同后端，支持范围匹配
 
-## v1.2 新增功能
+## v1.3 新增功能
+
+### 范围匹配
+- `/node-20001-30000` → 只接受 20001-30000 端口的路径
+- 范围匹配优先于通配符
+- 超出范围的端口会被拒绝
 
 ### 动态路由
 - `/node-*` → 自动提取路径中的端口号，路由到 `127.0.0.1:<port>`
-- 支持端口范围限制：`/node-20001-30000` → 只接受 20001-30000 端口
 - 端口热拔插：后端端口变更无需修改路由器配置
-
-### 静态路由
-- 固定路径映射到固定后端
-- 适合需要特定路径的场景
 
 ## 功能特性
 
@@ -21,6 +21,7 @@ WebSocket Path 路由器：按路径动态路由到不同后端
 - ✅ 纯 TCP 透传，不解构 Trojan 协议
 - ✅ 动态路由 `/node-*` 自动提取端口
 - ✅ 范围匹配 `/node-20001-30000`
+- ✅ 范围优先于通配符
 - ✅ 自身端口保护（防止循环）
 
 ## 安装
@@ -35,14 +36,28 @@ curl -sSL https://raw.githubusercontent.com/loensos/esa-router/main/deploy.sh | 
 
 ```bash
 # 下载预编译二进制
-wget https://github.com/loensos/esa-router/releases/download/v1.2/esa-router-linux-amd64
+wget https://github.com/loensos/esa-router/releases/download/v1.3/esa-router-linux-amd64
 chmod +x esa-router-linux-amd64
 mv esa-router-linux-amd64 /opt/esa-router/esa-router
 ```
 
 ## 配置说明
 
-### 动态路由（推荐）
+### 范围匹配（推荐用于特定端口范围）
+
+```toml
+listen_port = 7826
+
+[routers]
+  "/node-20001-30000" = "127.0.0.1:<port>"
+```
+
+**用法：**
+- `/node-25000` → 路由到 `127.0.0.1:25000`（在范围内）
+- `/node-2200` → 被拒绝（超出 20001-30000 范围）
+- `/node-30927` → 被拒绝（超出范围）
+
+### 通配符匹配（所有端口）
 
 ```toml
 listen_port = 7826
@@ -52,11 +67,11 @@ listen_port = 7826
 ```
 
 **用法：**
-- 客户端配置 path: `/node-21581` → 自动路由到 `127.0.0.1:21581`
-- 客户端配置 path: `/node-30927` → 自动路由到 `127.0.0.1:30927`
-- 后端端口变更无需修改路由器配置
+- `/node-21581` → 路由到 `127.0.0.1:21581`
+- `/node-30927` → 路由到 `127.0.0.1:30927`
+- 后端端口变更无需修改配置
 
-### 范围限制
+### 混合模式（范围 + 通配符）
 
 ```toml
 listen_port = 7826
@@ -66,9 +81,11 @@ listen_port = 7826
   "/node-20001-30000" = "127.0.0.1:<port>"
 ```
 
-**用法：**
-- `/node-2200` → 路由到 `127.0.0.1:2200`（在范围内）
-- `/node-5500` → 被拒绝（超出 20001-30000 范围）
+**优先级：范围匹配 > 通配符匹配**
+
+- `/node-25000` → 范围匹配成功（20001-30000）
+- `/node-2200` → 范围匹配失败，通配符匹配成功
+- `/node-30927` → 范围匹配失败，通配符匹配成功
 
 ### 静态路由
 
@@ -84,20 +101,6 @@ listen_port = 7826
 - 客户端配置 path: `/node-us` → 路由到 `127.0.0.1:30927`
 - 客户端配置 path: `/node-sg` → 路由到 `127.0.0.1:21580`
 
-### 混合模式
-
-```toml
-listen_port = 7826
-
-[routers]
-  "/node-us" = "127.0.0.1:30927"
-  "/node-sg" = "127.0.0.1:21580"
-  "/node-*" = "127.0.0.1:<port>"
-  "/node-20001-30000" = "127.0.0.1:<port>"
-```
-
-**优先级：** 静态路由 > 动态路由 > 范围路由
-
 ## 热重载
 
 ```bash
@@ -111,9 +114,39 @@ systemctl restart esa-router
 
 ## Release 版本
 
+- [v1.3](https://github.com/loensos/esa-router/releases/tag/v1.3) - 范围匹配优先于通配符
 - [v1.2](https://github.com/loensos/esa-router/releases/tag/v1.2) - 动态路由，端口热拔插
 - [v1.1](https://github.com/loensos/esa-router/releases/tag/v1.1) - 标准 TOML 配置，SIGHUP 热重载
 - [v1.0](https://github.com/loensos/esa-router/releases/tag/v1.0) - 初始版本
+
+## 示例场景
+
+### 场景 1：只允许特定端口范围
+
+```toml
+[routers]
+  "/node-20001-30000" = "127.0.0.1:<port>"
+```
+- 21580 ✓ (在范围内)
+- 30927 ✗ (超出范围)
+
+### 场景 2：所有端口都允许
+
+```toml
+[routers]
+  "/node-*" = "127.0.0.1:<port>"
+```
+- 21580 ✓
+- 30927 ✓
+- 任意端口都通
+
+### 场景 3：主要端口用通配符，敏感端口用范围限制
+
+```toml
+[routers]
+  "/node-*" = "127.0.0.1:<port>"
+  "/node-50000-60000" = "127.0.0.1:<port>"  # 只允许 50000-60000
+```
 
 ## 许可
 

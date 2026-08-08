@@ -1,10 +1,10 @@
 #!/bin/bash
-# ESA Router 安装脚本 v1.2
+# ESA Router 安装脚本 v1.3
 # 用法: curl -sSL https://raw.githubusercontent.com/loensos/esa-router/main/deploy.sh | bash
 
 set -e
 
-VERSION="1.2"
+VERSION="1.3"
 REPO="loensos/esa-router"
 GITHUB="https://github.com"
 INSTALL_DIR="/opt/esa-router"
@@ -83,16 +83,16 @@ create_config() {
         info "当前配置:"
         cat "$CONFIG_PATH"
     else
-        info "创建默认配置..."
+        info "创建默认配置 (v1.3 - 范围匹配)..."
         cat > "$CONFIG_PATH" << 'EOF'
-# ESA Router v1.2 配置
+# ESA Router v1.3 配置
 # 监听端口
 listen_port = 7826
 
 [routers]
-# 动态路由 - 自动提取端口号
+# 通配符路由 - 匹配所有 /node-端口 路径
 "/node-*" = "127.0.0.1:<port>"
-# 范围限制 - 只接受 20001-30000 端口
+# 范围路由 - 只接受 20001-30000 端口（优先于通配符）
 "/node-20001-30000" = "127.0.0.1:<port>"
 EOF
         info "配置已创建: $CONFIG_PATH"
@@ -158,13 +158,10 @@ show_usage() {
     echo "  重启: systemctl restart $SERVICE_NAME"
     echo "  重载: kill -1 \$(pgrep $SERVICE_NAME)"
     echo ""
-    echo "动态路由示例:"
-    echo "  /node-21581 → 127.0.0.1:21581"
-    echo "  /node-30927 → 127.0.0.1:30927"
-    echo ""
-    echo "静态路由示例:"
-    echo "  \"/node-us\" = \"127.0.0.1:30927\""
-    echo "  \"/node-sg\" = \"127.0.0.1:21580\""
+    echo "路由示例:"
+    echo "  /node-21581 → 127.0.0.1:21581 (通配符)"
+    echo "  /node-25000 → 127.0.0.1:25000 (范围内)"
+    echo "  /node-30927 → 被拒绝 (超出范围)"
     echo ""
 }
 
