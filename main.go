@@ -27,9 +27,32 @@ type Route struct {
 	Backend string
 }
 
-var routes = []Route{
-	{"/ws-us", "[2602:f66f:10:6b65::1]:30927"},
-	{"/ws-sg", "[2406:4440:20:28::a]:30932"},
+var routes []Route
+var configPath = "/root/trojan-router/config.toml"
+
+func loadConfig() error {
+	f, err := os.Open(configPath)
+	if err != nil {
+		return fmt.Errorf("open config: %w", err)
+	}
+	defer f.Close()
+
+	routes = nil
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 || bytes.HasPrefix(line, []byte("//")) {
+			continue
+		}
+		parts := bytes.Fields(line)
+		if len(parts) >= 2 {
+			routes = append(routes, Route{
+				Path:    string(parts[0]),
+				Backend: string(parts[1]),
+			})
+		}
+	}
+	return scanner.Err()
 }
 
 func findRoute(path string) *Route {
@@ -135,6 +158,12 @@ func main() {
 	log.SetFlags(log.Ltime | log.Lmsgprefix)
 	log.SetPrefix("[router] ")
 
+	if err := loadConfig(); err != nil {
+		log.Fatalf("Load config failed: %v", err)
+	}
+
+	log.Printf("Loaded %d routes from %s", len(routes), configPath)
+
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", listenPort))
 	if err != nil {
 		log.Fatalf("Listen: %v", err)
@@ -145,19 +174,34 @@ func main() {
 		log.Printf("  %s -> %s", r.Path, r.Backend)
 	}
 
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+
 	go func() {
-		<-sig
-		log.Println("Shutting down...")
-		ln.Close()
+		for sig := range sigCh {
+			if sig == syscall.SIGHUP {
+				log.Println("Reloading config...")
+				if err := loadConfig(); err != nil {
+					log.Printf("Reload failed: %v", err)
+					continue
+				}
+				log.Printf("Reloaded %d routes", len(routes))
+				for _, r := range routes {
+					log.Printf("  %s -> %s", r.Path, r.Backend)
+				}
+				continue
+			}
+			log.Println("Shutting down...")
+			ln.Close()
+			return
+		}
 	}()
 
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
 			select {
-			case <-sig:
+			case <-sigCh:
 				return
 			default:
 				continue
