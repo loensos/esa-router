@@ -202,14 +202,18 @@ func (d *DynamicRoute) matchDynamic(path string) (string, bool) {
 		return "", false
 	}
 	
-	// 检查范围
+	// 检查范围 - 提取 min 和 max
 	if bytes.Contains([]byte(d.Pattern), []byte("-")) {
 		parts := bytes.Split([]byte(d.Pattern), []byte("-"))
 		if len(parts) >= 3 {
+			// 提取最后两个数字部分 (例如 /node-2001-3000 的 2001 和 3000)
 			last := string(parts[len(parts)-1])
-			if maxPort, err := strconv.Atoi(last); err == nil {
-				if port < 1 || port > maxPort {
-					return "", false
+			secondLast := string(parts[len(parts)-2])
+			if minPort, err1 := strconv.Atoi(secondLast); err1 == nil {
+				if maxPort, err2 := strconv.Atoi(last); err2 == nil {
+					if port < minPort || port > maxPort {
+						return "", false
+					}
 				}
 			}
 		}
