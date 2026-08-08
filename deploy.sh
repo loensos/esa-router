@@ -5,7 +5,7 @@
 
 set -e
 
-VERSION="1.0"
+VERSION="1.1"
 REPO="loensos/esa-router"
 INSTALL_DIR="/opt/esa-router"
 CONFIG_DIR="/etc/esa-router"
