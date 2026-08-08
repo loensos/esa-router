@@ -4,7 +4,7 @@
 
 set -e
 
-VERSION="1.3"
+VERSION="1.4"
 REPO="loensos/esa-router"
 GITHUB="https://github.com"
 INSTALL_DIR="/opt/esa-router"

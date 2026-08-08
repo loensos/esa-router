@@ -1,8 +1,8 @@
-# ESA Router v1.3
+# ESA Router v1.4
 
 WebSocket Path 路由器：按路径动态路由到不同后端，支持范围匹配
 
-## v1.3 新增功能
+## v1.4 新增功能
 
 ### 范围匹配
 - `/node-20001-30000` → 只接受 20001-30000 端口的路径
@@ -36,7 +36,7 @@ curl -sSL https://raw.githubusercontent.com/loensos/esa-router/main/deploy.sh | 
 
 ```bash
 # 下载预编译二进制
-wget https://github.com/loensos/esa-router/releases/download/v1.3/esa-router-linux-amd64
+wget https://github.com/loensos/esa-router/releases/download/v1.4/esa-router-linux-amd64
 chmod +x esa-router-linux-amd64
 mv esa-router-linux-amd64 /opt/esa-router/esa-router
 ```
@@ -114,7 +114,7 @@ systemctl restart esa-router
 
 ## Release 版本
 
-- [v1.3](https://github.com/loensos/esa-router/releases/tag/v1.3) - 范围匹配优先于通配符
+- [v1.4](https://github.com/loensos/esa-router/releases/tag/v1.4) - 范围匹配优先于通配符
 - [v1.2](https://github.com/loensos/esa-router/releases/tag/v1.2) - 动态路由，端口热拔插
 - [v1.1](https://github.com/loensos/esa-router/releases/tag/v1.1) - 标准 TOML 配置，SIGHUP 热重载
 - [v1.0](https://github.com/loensos/esa-router/releases/tag/v1.0) - 初始版本
