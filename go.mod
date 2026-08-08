@@ -1,3 +1,1 @@
-module esa-router
-
-go 1.21
+module esa-router\n\ngo 1.21
