@@ -11,13 +11,28 @@
 
 ## 安装
 
+### 一键安装（推荐）
+
 ```bash
+curl -sSL https://raw.githubusercontent.com/loensos/esa-router/main/deploy.sh | bash
+```
+
+### 手动安装
+
+```bash
+# 下载预编译二进制
+wget https://github.com/loensos/esa-router/releases/download/v1.0/esa-router-linux-amd64
+chmod +x esa-router-linux-amd64
+mv esa-router-linux-amd64 /opt/esa-router/esa-router
+
+# 或从源码编译
 git clone https://github.com/loensos/esa-router.git
 cd esa-router
 go build -o esa-router main.go
 mkdir -p /opt/esa-router
-cp config.toml esa-router /opt/esa-router/
-/opt/esa-router/esa-router
+cp main.go go.mod config.toml /opt/esa-router/
+cd /opt/esa-router
+go build -o esa-router main.go
 ```
 
 ## 配置 (config.toml)
@@ -39,6 +54,7 @@ kill -1 $(pgrep esa-router)
 ## Release
 
 - [v1.0](https://github.com/loensos/esa-router/releases/tag/v1.0)
+- 预编译二进制: [esa-router-linux-amd64](https://github.com/loensos/esa-router/releases/download/v1.0/esa-router-linux-amd64)
 
 ## 许可
 
