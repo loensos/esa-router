@@ -1,234 +1,225 @@
 package main
 
 import (
-\t"bufio"
-\t"bytes"
-\t"fmt"
-\t"io"
-\t"log"
-\t"net"
-\t"os"
-\t"os/signal"
-\t"strings"
-\t"sync"
-\t"syscall"
-\t"time"
+	"bufio"
+	"bytes"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/BurntSushi/toml"
 )
 
 const (
-\tdefaultPort = 1000
-\tbufSize     = 131072
-\tconnectTO   = 10 * time.Second
-\tidleTO      = 300 * time.Second
-\twriteTO     = 30 * time.Second
+	defaultPort = 1000
+	bufSize     = 131072
+	connectTO   = 10 * time.Second
+	idleTO      = 300 * time.Second
+	writeTO     = 30 * time.Second
 )
 
 type Route struct {
-\tPath    string
-\tBackend string
+	Path    string
+	Backend string
+}
+
+type Config struct {
+	ListenPort int              `toml:"listen_port"`
+	Routers    map[string]string `toml:"routers"`
 }
 
 var (
-\troutes     []Route
-\tconfigPath = "/root/trojan-router/config.toml"
-\tlistenPort = defaultPort
+	configPath string
+	listenPort int
+	routes     []Route
 )
 
 func loadConfig() error {
-\tf, err := os.Open(configPath)
-\tif err != nil {
-\t\treturn fmt.Errorf("open config: %w", err)
-\t}
-\tdefer f.Close()
+	var cfg Config
+	if _, err := toml.DecodeFile(configPath, &cfg); err != nil {
+		return fmt.Errorf("decode config: %w", err)
+	}
 
-\troutes = nil
-\tlistenPort = defaultPort
+	if cfg.ListenPort > 0 {
+		listenPort = cfg.ListenPort
+	} else {
+		listenPort = defaultPort
+	}
 
-\tscanner := bufio.NewScanner(f)
-\tfor scanner.Scan() {
-\t\tline := bytes.TrimSpace(scanner.Bytes())
-\t\tif len(line) == 0 || bytes.HasPrefix(line, []byte("//")) {
-\t\t\tcontinue
-\t\t}
+	routes = nil
+	for path, backend := range cfg.Routers {
+		routes = append(routes, Route{Path: path, Backend: backend})
+	}
 
-\t\tif bytes.HasPrefix(line, []byte("listen")) {
-\t\t\tparts := bytes.Fields(line)
-\t\t\tif len(parts) >= 3 && bytes.Equal(parts[1], []byte("=")) {
-\t\t\t\taddr := strings.TrimSpace(string(parts[2]))
-\t\t\t\taddr = strings.Trim(addr, "\"")
-\t\t\t\taddr = strings.Trim(addr, "'")
-\t\t\t\tif len(addr) > 0 && addr[0] == ':' {
-\t\t\t\t\tportStr := addr[1:]
-\t\t\t\t\tfmt.Sscanf(portStr, "%d", &listenPort)
-\t\t\t\t}
-\t\t\t}
-\t\t\tcontinue
-\t\t}
-
-\t\tparts := bytes.Fields(line)
-\t\tif len(parts) >= 2 {
-\t\t\troutes = append(routes, Route{
-\t\t\t\tPath:    string(parts[0]),
-\t\t\t\tBackend: string(parts[1]),
-\t\t\t})
-\t\t}
-\t}
-\treturn scanner.Err()
+	return nil
 }
 
 func findRoute(path string) *Route {
-\tfor i := range routes {
-\t\tif bytes.HasPrefix([]byte(path), []byte(routes[i].Path)) {
-\t\t\treturn &routes[i]
-\t\t}
-\t}
-\treturn nil
+	for i := range routes {
+		if bytes.HasPrefix([]byte(path), []byte(routes[i].Path)) {
+			return &routes[i]
+		}
+	}
+	return nil
 }
 
 func copyConn(src, dst net.Conn, name string, done chan<- error) {
-\tbuf := make([]byte, bufSize)
-\tfor {
-\t\tsrc.SetReadDeadline(time.Now().Add(idleTO))
-\t\tn, err := src.Read(buf)
-\t\tif n > 0 {
-\t\t\tdst.SetWriteDeadline(time.Now().Add(writeTO))
-\t\t\tif _, werr := dst.Write(buf[:n]); werr != nil {
-\t\t\t\tdone <- fmt.Errorf("%s write: %w", name, werr)
-\t\t\t\treturn
-\t\t\t}
-\t\t}
-\t\tif err != nil {
-\t\t\tif err == io.EOF {
-\t\t\t\tdone <- nil
-\t\t\t} else {
-\t\t\t\tdone <- fmt.Errorf("%s read: %w", name, err)
-\t\t\t}
-\t\t\treturn
-\t\t}
-\t}
+	buf := make([]byte, bufSize)
+	for {
+		src.SetReadDeadline(time.Now().Add(idleTO))
+		n, err := src.Read(buf)
+		if n > 0 {
+			dst.SetWriteDeadline(time.Now().Add(writeTO))
+			if _, werr := dst.Write(buf[:n]); werr != nil {
+				done <- fmt.Errorf("%s write: %w", name, werr)
+				return
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				done <- nil
+			} else {
+				done <- fmt.Errorf("%s read: %w", name, err)
+			}
+			return
+		}
+	}
 }
 
 func handle(conn net.Conn) {
-\tdefer conn.Close()
+	defer conn.Close()
 
-\treader := bufio.NewReader(conn)
-\tvar header bytes.Buffer
+	reader := bufio.NewReader(conn)
+	var header bytes.Buffer
 
-\tfor {
-\t\tline, err := reader.ReadString('\n')
-\t\tif err != nil {
-\t\t\treturn
-\t\t}
-\t\theader.WriteString(line)
-\t\tif line == "\r\n" || line == "\n" {
-\t\t\tbreak
-\t\t}
-\t}
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return
+		}
+		header.WriteString(line)
+		if line == "\r\n" || line == "\n" {
+			break
+		}
+	}
 
-\tfirstLine := header.Bytes()
-\tidx := bytes.Index(firstLine, []byte("\r\n"))
-\tif idx < 0 {
-\t\treturn
-\t}
-\tfields := bytes.Fields(firstLine[:idx])
-\tif len(fields) < 2 {
-\t\treturn
-\t}
-\tpath := string(fields[1])
-\tpathBytes := []byte(path)
-\tif q := bytes.Index(pathBytes, []byte("?")); q >= 0 {
-\t\tpath = string(pathBytes[:q])
-\t}
+	firstLine := header.Bytes()
+	idx := bytes.Index(firstLine, []byte("\r\n"))
+	if idx < 0 {
+		return
+	}
+	fields := bytes.Fields(firstLine[:idx])
+	if len(fields) < 2 {
+		return
+	}
+	path := string(fields[1])
+	pathBytes := []byte(path)
+	if q := bytes.Index(pathBytes, []byte("?")); q >= 0 {
+		path = string(pathBytes[:q])
+	}
 
-\troute := findRoute(path)
-\tif route == nil {
-\t\tlog.Printf("Unknown path: %s", path)
-\t\treturn
-\t}
+	route := findRoute(path)
+	if route == nil {
+		log.Printf("Unknown path: %s", path)
+		return
+	}
 
-\tlog.Printf("%s -> %s", path, route.Backend)
+	log.Printf("%s -> %s", path, route.Backend)
 
-\ttarget, err := net.DialTimeout("tcp", route.Backend, connectTO)
-\tif err != nil {
-\t\tlog.Printf("Backend error: %v", err)
-\t\treturn
-\t}
-\tdefer target.Close()
+	target, err := net.DialTimeout("tcp", route.Backend, connectTO)
+	if err != nil {
+		log.Printf("Backend error: %v", err)
+		return
+	}
+	defer target.Close()
 
-\tif _, err := target.Write(header.Bytes()); err != nil {
-\t\tlog.Printf("Header write error: %v", err)
-\t\treturn
-\t}
+	if _, err := target.Write(header.Bytes()); err != nil {
+		log.Printf("Header write error: %v", err)
+		return
+	}
 
-\tc2b := make(chan error, 1)
-\tb2c := make(chan error, 1)
+	c2b := make(chan error, 1)
+	b2c := make(chan error, 1)
 
-\tgo copyConn(conn, target, "C->B", c2b)
-\tgo copyConn(target, conn, "B->C", b2c)
+	go copyConn(conn, target, "C->B", c2b)
+	go copyConn(target, conn, "B->C", b2c)
 
-\tvar wg sync.WaitGroup
-\twg.Add(2)
-\tgo func() { c2b <- <-c2b; wg.Done() }()
-\tgo func() { b2c <- <-b2c; wg.Done() }()
-\twg.Wait()
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { c2b <- <-c2b; wg.Done() }()
+	go func() { b2c <- <-b2c; wg.Done() }()
+	wg.Wait()
 
-\tlog.Printf("Done: C->B=%v, B->C=%v", <-c2b, <-b2c)
+	log.Printf("Done: C->B=%v, B->C=%v", <-c2b, <-b2c)
 }
 
 func main() {
-\tlog.SetFlags(log.Ltime | log.Lmsgprefix)
-\tlog.SetPrefix("[router] ")
+	log.SetFlags(log.Ltime | log.Lmsgprefix)
+	log.SetPrefix("[router] ")
 
-\tif err := loadConfig(); err != nil {
-\t\tlog.Fatalf("Load config failed: %v", err)
-\t}
+	args := os.Args[1:]
+	if len(args) == 0 {
+		configPath = "/etc/esa-router/config.toml"
+	} else {
+		configPath = args[0]
+	}
 
-\tlog.Printf("Loaded %d routes from %s", len(routes), configPath)
+	if err := loadConfig(); err != nil {
+		log.Fatalf("Load config failed: %v", err)
+	}
 
-\taddr := fmt.Sprintf(":%d", listenPort)
-\tln, err := net.Listen("tcp", addr)
-\tif err != nil {
-\t\tlog.Fatalf("Listen: %v", err)
-\t}
+	log.Printf("Loaded %d routes from %s", len(routes), configPath)
 
-\tlog.Printf("Listening on %s", addr)
-\tfor _, r := range routes {
-\t\tlog.Printf("  %s -> %s", r.Path, r.Backend)
-\t}
+	addr := fmt.Sprintf(":%d", listenPort)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatalf("Listen: %v", err)
+	}
 
-\tsigCh := make(chan os.Signal, 1)
-\tsignal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	log.Printf("Listening on %s", addr)
+	for _, r := range routes {
+		log.Printf("  %s -> %s", r.Path, r.Backend)
+	}
 
-\tgo func() {
-\t\tfor sig := range sigCh {
-\t\t\tif sig == syscall.SIGHUP {
-\t\t\t\tlog.Println("Reloading config...")
-\t\t\t\tif err := loadConfig(); err != nil {
-\t\t\t\t\tlog.Printf("Reload failed: %v", err)
-\t\t\t\t\tcontinue
-\t\t\t\t}
-\t\t\t\tlog.Printf("Reloaded %d routes", len(routes))
-\t\t\t\tfor _, r := range routes {
-\t\t\t\t\tlog.Printf("  %s -> %s", r.Path, r.Backend)
-\t\t\t\t}
-\t\t\t\tcontinue
-\t\t\t}
-\t\t\tlog.Println("Shutting down...")
-\t\t\tln.Close()
-\t\t\treturn
-\t\t}
-\t}()
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
-\tfor {
-\t\tconn, err := ln.Accept()
-\t\tif err != nil {
-\t\t\tselect {
-\t\t\tcase <-sigCh:
-\t\t\t\treturn
-\t\t\tdefault:
-\t\t\t\tcontinue
-\t\t\t}
-\t\t}
-\t\tgo handle(conn)
-\t}
+	go func() {
+		for sig := range sigCh {
+			if sig == syscall.SIGHUP {
+				log.Println("Reloading config...")
+				if err := loadConfig(); err != nil {
+					log.Printf("Reload failed: %v", err)
+					continue
+				}
+				log.Printf("Reloaded %d routes", len(routes))
+				for _, r := range routes {
+					log.Printf("  %s -> %s", r.Path, r.Backend)
+				}
+				continue
+			}
+			log.Println("Shutting down...")
+			ln.Close()
+			return
+		}
+	}()
+
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			select {
+			case <-sigCh:
+				return
+			default:
+				continue
+			}
+		}
+		go handle(conn)
+	}
 }
