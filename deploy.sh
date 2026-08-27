@@ -7,12 +7,12 @@ set -e
 VERSION="1.5"
 REPO="loensos/esa-router"
 GITHUB="https://github.com"
-INSTALL_DIR="/opt/esa-router"
+INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/esa-router"
 SERVICE_NAME="esa-router"
 
 BINARY_NAME="esa-router-linux-amd64"
-BINARY_PATH="$INSTALL_DIR/$BINARY_NAME"
+BINARY_PATH="$INSTALL_DIR/esa-router"
 SYMLINK_PATH="$INSTALL_DIR/esa-router"
 CONFIG_PATH="$CONFIG_DIR/config.toml"
 
@@ -60,20 +60,32 @@ create_directories() {
 }
 
 download_binary() {
-    info "下载 ESA Router v$VERSION..."
-    local url="$GITHUB/$REPO/releases/download/v$VERSION/$BINARY_NAME"
-    
-    curl -sL "$url" -o "$BINARY_PATH.new" || error "下载失败"
-    
+    info "检查二进制文件..."
+    # 优先使用本地编译的二进制
+    if [ -f "/root/esa-router/esa-router-v1.5" ]; then
+        info "使用本地编译的二进制..."
+        cp "/root/esa-router/esa-router-v1.5" "$BINARY_PATH.new"
+    else
+        info "下载 ESA Router v$VERSION..."
+        local url="$GITHUB/$REPO/releases/download/v$VERSION/$BINARY_NAME"
+        curl -sL "$url" -o "$BINARY_PATH.new" || {
+            warn "GitHub 下载失败，尝试直接从源码目录复制"
+            if [ -f "/root/esa-router/esa-router-linux-amd64" ]; then
+                cp "/root/esa-router/esa-router-linux-amd64" "$BINARY_PATH.new"
+            else
+                error "无法获取二进制文件，请手动上传"
+            fi
+        }
+    fi
+
     # 验证文件
     if [ ! -s "$BINARY_PATH.new" ]; then
         error "下载的文件为空"
     fi
-    
+
     chmod +x "$BINARY_PATH.new"
     mv "$BINARY_PATH.new" "$BINARY_PATH"
-    ln -sf "$BINARY_PATH" "$SYMLINK_PATH"
-    
+
     info "二进制已安装: $(ls -lh "$BINARY_PATH" | awk '{print $5}')"
 }
 
