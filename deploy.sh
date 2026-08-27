@@ -83,10 +83,11 @@ create_config() {
         info "当前配置:"
         cat "$CONFIG_PATH"
     else
-        info "创建默认配置 (v1.5 - 范围匹配)..."
+        info "创建默认配置 (v1.5)..."
         cat > "$CONFIG_PATH" << 'EOF'
 # ESA Router v1.5 配置
-# 监听端口 - 由用户设置
+# 监听端口
+listen_port = 7826
 
 [routers]
 # 通配符路由 - 匹配所有 /node-端口 路径
@@ -185,6 +186,7 @@ update_mode() {
 
 install_full() {
     download_binary
+    create_directories
     create_config
     install_service
     start_service
