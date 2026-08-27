@@ -1,8 +1,4 @@
-<<<<<<< HEAD
 # ESA Router v1.5.1
-=======
-# ESA Router v1.5
->>>>>>> cbaeffa82d61f9fdc665cf4e724c00d1aa188d6b
 
 TCP 透传路由器：按 WebSocket 路径动态路由到不同后端，支持范围匹配和 TCP Keepalive。
 1、支持trojan+ws、vless+ws、vmess+ws等，落地协议不能配置tls。
@@ -11,7 +7,6 @@ TCP 透传路由器：按 WebSocket 路径动态路由到不同后端，支持�
 4、esa回源规则：A、传入请求类型～选自定义规则～选url路径～开头为～/node ( node为例子，可为任意固定值，如此才能动态选端口。)
 B、回源协议和端口～回源协议选 http ～ http端口可为任意端口，不与落地转发端口一样就行。
 
-<<<<<<< HEAD
 ## v1.5.1 新增功能
 
 ### TCP Keepalive
@@ -24,9 +19,6 @@ B、回源协议和端口～回源协议选 http ～ http端口可为任意端�
 - `ESA_PORT=1000`: 环境变量指定端口
 
 ## v1.4 新增功能
-=======
-## 分流说明
->>>>>>> cbaeffa82d61f9fdc665cf4e724c00d1aa188d6b
 
 ### 范围匹配
 - `/node-20001-30000` → 只接受 20001-30000 端口的路径
@@ -35,9 +27,8 @@ B、回源协议和端口～回源协议选 http ～ http端口可为任意端�
 
 ### 动态路由
 - `/node-*` → 自动提取路径中的端口号，路由到 `127.0.0.1:<port>`
-- 说明：节点的ws 填写 /node-20111时，自动分流到 127.0.0.1:20111
+- 端口热拔插：后端端口变更无需修改路由器配置
 
-  
 ## 功能特性
 
 - ✅ 配置文件路由 (config.toml)
@@ -64,8 +55,8 @@ curl -sSL https://raw.githubusercontent.com/loensos/esa-router/main/deploy.sh | 
 ```bash
 # 下载预编译二进制
 wget https://github.com/loensos/esa-router/releases/download/v1.5.1/esa-router-v1.5-linux-amd64
-chmod +x esa-router-linux-amd64
-mv esa-router-linux-amd64 /opt/esa-router/esa-router
+chmod +x esa-router-v1.5-linux-amd64
+mv esa-router-v1.5-linux-amd64 /usr/local/bin/esa-router
 ```
 
 ## 配置说明
@@ -73,7 +64,7 @@ mv esa-router-linux-amd64 /opt/esa-router/esa-router
 ### 范围匹配（推荐用于特定端口范围）
 
 ```toml
-listen_port = 7826
+listen_port = 1000
 
 [routers]
   "/node-20001-30000" = "127.0.0.1:<port>"
@@ -87,7 +78,7 @@ listen_port = 7826
 ### 通配符匹配（所有端口）
 
 ```toml
-listen_port = 7826
+listen_port = 1000
 
 [routers]
   "/node-*" = "127.0.0.1:<port>"
@@ -98,14 +89,13 @@ listen_port = 7826
 - `/node-30927` → 路由到 `127.0.0.1:30927`
 - 后端端口变更无需修改配置
 
-### 混合模式（通配符 + 静态 + 范围）
+### 混合模式（范围 + 通配符）
 
 ```toml
-listen_port = 7826
+listen_port = 1000
 
 [routers]
   "/node-*" = "127.0.0.1:<port>"
-  "/node-us" = "127.0.0.1:8888"
   "/node-20001-30000" = "127.0.0.1:<port>"
 ```
 
@@ -118,7 +108,7 @@ listen_port = 7826
 ### 静态路由
 
 ```toml
-listen_port = 7826
+listen_port = 1000
 
 [routers]
   "/node-us" = "127.0.0.1:30927"
