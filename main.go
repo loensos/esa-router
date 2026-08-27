@@ -298,8 +298,11 @@ func copyConn(src, dst net.Conn, name string, done chan<- error) {
 }
 
 func handle(conn net.Conn) {
-	// Enable TCP keepalive on backend connection (toward real backend server)
-	// Do NOT enable on client connection
+	// Enable TCP keepalive on client connection (toward ESA/CDN)
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		tcpConn.SetKeepAlive(true)
+		tcpConn.SetKeepAlivePeriod(30 * time.Second)
+	}
 
 	defer conn.Close()
 
@@ -413,7 +416,9 @@ func main() {
 	log.Printf("Loaded %d static routes, %d dynamic routes", len(routes), len(dynRoutes))
 
 	addr := fmt.Sprintf(":%d", listenPort)
-	lc := net.ListenConfig{}
+	lc := net.ListenConfig{
+		KeepAlive: 30 * time.Second,
+	}
 	ln, err := lc.Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		log.Fatalf("Listen: %v", err)
