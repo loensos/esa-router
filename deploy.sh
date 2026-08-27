@@ -220,11 +220,12 @@ update_mode() {
     echo "选择更新模式:"
     echo "  1) 完整安装 (更新二进制+重新配置)"
     echo "  2) 仅更新二进制"
-    echo "  3) 检查更新"
-    echo "  4) 退出"
+    echo "  3) 设置参数 (修改端口/路由)"
+    echo "  4) 检查更新"
+    echo "  5) 退出"
     echo ""
 
-    read -r -p "请选择 [1-4]: " choice
+    read -r -p "请选择 [1-5]: " choice
     case $choice in
         1)
             download_binary
@@ -233,10 +234,82 @@ update_mode() {
             info "二进制和配置已更新，服务已重启"
             ;;
         2) update_binary_only ;;
-        3) check_update ;;
-        4) echo "退出"; exit 0 ;;
+        3) configure_params ;;
+        4) check_update ;;
+        5) echo "退出"; exit 0 ;;
         *) error "无效选择" ;;
     esac
+}
+
+configure_params() {
+    echo ""
+    info "参数设置"
+    echo ""
+    info "当前配置:"
+    if [ -f "$CONFIG_PATH" ]; then
+        cat "$CONFIG_PATH"
+    else
+        echo "  (无配置文件)"
+    fi
+    echo ""
+
+    read -r -p "是否修改配置? [y/N]: " modify_config
+    if [[ ! "$modify_config" =~ ^[Yy]$ ]]; then
+        info "跳过配置"
+        return
+    fi
+
+    # 修改监听端口
+    local current_port=$(grep 'listen_port' "$CONFIG_PATH" 2>/dev/null | grep -oE '[0-9]+' || echo "7826")
+    read -r -p "监听端口 [$current_port]: " port_input
+    listen_port="${port_input:-$current_port}"
+
+    # 修改路由模式
+    echo ""
+    echo "请选择路由模式:"
+    echo "  1) 通配符模式 (/node-* 匹配所有端口)"
+    echo "  2) 范围模式 (/node-20001-30000 匹配指定范围)"
+    echo "  3) 静态模式 (/node-us -> 指定端口)"
+    echo ""
+    read -r -p "选择 [1-3]: " route_mode
+
+    case $route_mode in
+        1)
+            route_config='"/node-*" = "127.0.0.1:<port>"'
+            ;;
+        2)
+            read -r -p "端口范围 (如 20001-30000) [$current_port-40000]: " range_input
+            range="${range_input:-20001-40000}"
+            route_config="\"/node-$range\" = \"127.0.0.1:<port>\""
+            ;;
+        3)
+            info "静态模式示例: /node-us = 127.0.0.1:30927"
+            read -r -p "请输入路由规则 (如 '/node-us' = '127.0.0.1:30927'): " static_rule
+            if [ -z "$static_rule" ]; then
+                static_rule='"/node-us" = "127.0.0.1:30927"'
+            fi
+            route_config="$static_rule"
+            ;;
+        *)
+            route_config='"/node-*" = "127.0.0.1:<port>"'
+            warn "无效选择，使用默认通配符模式"
+            ;;
+    esac
+
+    info "创建配置文件..."
+    cat > "$CONFIG_PATH" << EOF
+# ESA Router v1.5 配置
+listen_port = $listen_port
+
+[routers]
+$route_config
+EOF
+    info "配置已更新: $CONFIG_PATH"
+
+    # 重启服务
+    systemctl restart "$SERVICE_NAME" 2>/dev/null || nohup /usr/local/bin/esa-router /etc/esa-router/config.toml > /var/log/esa-router.log 2>&1 &
+    sleep 1
+    info "服务已重启"
 }
 
 install_full() {
