@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -252,7 +254,7 @@ func main() {
 	log.Printf("Listening on %s", addr)
 
 	for _, r := range routes {
-		log.Printf("  %s -> %s (static)", r.Path, r.Backend)
+		log.Printf("  %s -> %s (static)", r.Pattern, r.Backend)
 	}
 	for _, r := range dynRoutes {
 		log.Printf("  %s -> %s (dynamic)", r.Pattern, r.Backend)
