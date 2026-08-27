@@ -264,46 +264,85 @@ configure_params() {
     read -r -p "监听端口 [$current_port]: " port_input
     listen_port="${port_input:-$current_port}"
 
-    # 修改路由模式
-    echo ""
-    echo "请选择路由模式:"
-    echo "  1) 通配符模式 (/node-* 匹配所有端口)"
-    echo "  2) 范围模式 (/node-20001-30000 匹配指定范围)"
-    echo "  3) 静态模式 (/node-us -> 指定端口)"
-    echo ""
-    read -r -p "选择 [1-3]: " route_mode
+    # 路由管理
+    local -a routes=()
+    local route_count=0
 
-    case $route_mode in
-        1)
-            route_config='"/node-*" = "127.0.0.1:<port>"'
-            ;;
-        2)
-            read -r -p "端口范围 (如 20001-30000) [$current_port-40000]: " range_input
-            range="${range_input:-20001-40000}"
-            route_config="\"/node-$range\" = \"127.0.0.1:<port>\""
-            ;;
-        3)
-            info "静态模式示例: /node-us = 127.0.0.1:30927"
-            read -r -p "请输入路由规则 (如 '/node-us' = '127.0.0.1:30927'): " static_rule
-            if [ -z "$static_rule" ]; then
-                static_rule='"/node-us" = "127.0.0.1:30927"'
-            fi
-            route_config="$static_rule"
-            ;;
-        *)
-            route_config='"/node-*" = "127.0.0.1:<port>"'
-            warn "无效选择，使用默认通配符模式"
-            ;;
-    esac
+    while true; do
+        echo ""
+        echo "路由列表 ($route_count 条):"
+        if [ $route_count -eq 0 ]; then
+            echo "  (空)"
+        else
+            for i in "${!routes[@]}"; do
+                echo "  $((i+1)). ${routes[$i]}"
+            done
+        fi
+        echo ""
+        echo "  1) 添加通配符路由 (/node-* 匹配所有端口)"
+        echo "  2) 添加范围路由 (/node-20001-30000)"
+        echo "  3) 添加静态路由 (/node-us -> 指定端口)"
+        echo "  4) 删除路由"
+        echo "  5) 完成并保存"
+        echo ""
+        read -r -p "选择 [1-5]: " route_action
 
+        case $route_action in
+            1)
+                routes+=('"/node-*" = "127.0.0.1:<port>"')
+                route_count=$((route_count + 1))
+                info "已添加: /node-*"
+                ;;
+            2)
+                read -r -p "端口范围 (如 20001-30000) [20001-40000]: " range_input
+                range="${range_input:-20001-40000}"
+                routes+=("\"/node-$range\" = \"127.0.0.1:<port>\"")
+                route_count=$((route_count + 1))
+                info "已添加: /node-$range"
+                ;;
+            3)
+                info "静态模式示例: /node-us = 127.0.0.1:30927"
+                read -r -p "请输入路由规则 (如 '/node-us' = '127.0.0.1:30927'): " static_rule
+                if [ -n "$static_rule" ]; then
+                    routes+=("$static_rule")
+                    route_count=$((route_count + 1))
+                    info "已添加: $static_rule"
+                fi
+                ;;
+            4)
+                if [ $route_count -eq 0 ]; then
+                    warn "没有可删除的路由"
+                    continue
+                fi
+                echo ""
+                read -r -p "删除第几条 [1-$route_count]: " del_idx
+                if [[ "$del_idx" =~ ^[0-9]+$ ]] && [ "$del_idx" -ge 1 ] && [ "$del_idx" -le "$route_count" ]; then
+                    unset 'routes[$((del_idx-1))]'
+                    routes=("${routes[@]}")
+                    route_count=$((route_count - 1))
+                    info "已删除路由 #$del_idx"
+                fi
+                ;;
+            5)
+                break
+                ;;
+            *)
+                warn "无效选择"
+                ;;
+        esac
+    done
+
+    # 生成配置文件
     info "创建配置文件..."
-    cat > "$CONFIG_PATH" << EOF
-# ESA Router v1.5 配置
-listen_port = $listen_port
-
-[routers]
-$route_config
-EOF
+    {
+        echo "# ESA Router v1.5 配置"
+        echo "listen_port = $listen_port"
+        echo ""
+        echo "[routers]"
+        for route in "${routes[@]}"; do
+            echo "$route"
+        done
+    } > "$CONFIG_PATH"
     info "配置已更新: $CONFIG_PATH"
 
     # 重启服务
