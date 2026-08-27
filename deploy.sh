@@ -264,9 +264,17 @@ configure_params() {
     read -r -p "监听端口 [$current_port]: " port_input
     listen_port="${port_input:-$current_port}"
 
-    # 路由管理
+    # 加载现有路由
     local -a routes=()
     local route_count=0
+    if [ -f "$CONFIG_PATH" ]; then
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^\".*\".*=.* ]]; then
+                routes+=("$line")
+                route_count=$((route_count + 1))
+            fi
+        done < <(grep -E '^\s*"[/].*"' "$CONFIG_PATH" 2>/dev/null)
+    fi
 
     while true; do
         echo ""
