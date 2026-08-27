@@ -79,10 +79,15 @@ download_binary() {
 
 create_config() {
     if [ -f "$CONFIG_PATH" ]; then
-        warn "配置文件已存在，跳过创建: $CONFIG_PATH"
+        warn "配置文件已存在: $CONFIG_PATH"
         info "当前配置:"
         cat "$CONFIG_PATH"
-        return
+        echo ""
+        read -r -p "是否重新配置? [y/N]: " reconfig
+        if [[ ! "$reconfig" =~ ^[Yy]$ ]]; then
+            info "跳过配置"
+            return
+        fi
     fi
 
     info "配置 ESA Router..."
