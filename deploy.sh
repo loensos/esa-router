@@ -304,7 +304,8 @@ configure_params() {
                 info "静态模式示例: /node-us = 127.0.0.1:30927"
                 read -r -p "请输入路由规则 (如 '/node-us' = '127.0.0.1:30927'): " static_rule
                 if [ -n "$static_rule" ]; then
-                    # 自动添加引号
+                    # 去除首尾空格并添加引号
+                    static_rule=$(echo "$static_rule" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
                     route_entry=$(echo "$static_rule" | sed 's|^"\([^"]*\)"\s*=\s*"\([^"]*\)"$|"\1" = "\2"|; s|^"\([^"]*\)"\s*=\s*\(.*\)$|"\1" = "\2"|; s|^\([^=]*\)\s*=\s*\(.*\)$|"\1" = "\2"|')
                     routes+=("$route_entry")
                     route_count=$((route_count + 1))
