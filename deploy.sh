@@ -142,7 +142,7 @@ create_config() {
 listen_port = $listen_port
 
 [routers]
-$route_config
+  $route_config
 EOF
     info "配置已创建: $CONFIG_PATH"
 }
@@ -349,7 +349,7 @@ configure_params() {
         echo ""
         echo "[routers]"
         for route in "${routes[@]}"; do
-            echo "$route"
+            echo "  $route"
         done
     } > "$CONFIG_PATH"
     info "配置已更新: $CONFIG_PATH"
