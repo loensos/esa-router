@@ -244,11 +244,6 @@ func main() {
 		}
 	}
 
-	configPath := "/etc/esa-router/config.toml"
-	if len(os.Args) > 1 {
-		configPath = os.Args[1]
-	}
-
 	if err := loadConfig(); err != nil {
 		log.Fatalf("Load config failed: %v", err)
 	}
