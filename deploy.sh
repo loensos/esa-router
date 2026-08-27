@@ -342,16 +342,18 @@ check_update() {
 # 交互模式检测
 if [ -t 0 ]; then
     echo "==================================="
-    echo "  ESA Router v$VERSION 安装脚本"
+    echo "  ESA Router v$VERSION 管理脚本"
     echo "==================================="
     echo ""
     echo "1) 全新安装"
-    echo "2) 更新安装"
-    echo "3) 退出"
+    echo "2) 更新二进制"
+    echo "3) 设置参数"
+    echo "4) 检查更新"
+    echo "5) 退出"
     echo ""
-    
-    read -r -p "请选择 [1-3]: " choice
-    
+
+    read -r -p "请选择 [1-5]: " choice
+
     case $choice in
         1)
             check_root
@@ -359,15 +361,27 @@ if [ -t 0 ]; then
             check_arch
             install_dependencies
             create_directories
-            install_full
+            download_binary
+            create_config
+            install_service
+            start_service
+            show_usage
             ;;
         2)
             check_root
             check_os
             check_arch
-            update_mode
+            update_binary_only
             ;;
         3)
+            check_root
+            configure_params
+            ;;
+        4)
+            check_root
+            check_update
+            ;;
+        5)
             echo "退出"
             exit 0
             ;;
