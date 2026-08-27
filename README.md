@@ -44,10 +44,14 @@ B、回源协议和端口～回源协议选 http ～ http端口可为任意端�
 
 ## 安装
 
-### 一键安装（推荐）
+### 交互式安装（推荐）
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/loensos/esa-router/main/deploy.sh | bash
+# 1. 下载脚本
+curl -sSL https://raw.githubusercontent.com/loensos/esa-router/main/deploy.sh -o deploy.sh
+
+# 2. 运行脚本（显示交互菜单）
+bash deploy.sh
 ```
 
 ### 手动安装
