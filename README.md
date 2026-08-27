@@ -1,4 +1,4 @@
-# ESA Router v1.4
+# ESA Router v1.5
 
 WebSocket Path 路由器：按路径动态路由到不同后端，支持范围匹配。
 1、支持trojan+ws、vless+ws、vmess+ws等，落地协议不能配置tls。
