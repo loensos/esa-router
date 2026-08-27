@@ -298,12 +298,9 @@ func copyConn(src, dst net.Conn, name string, done chan<- error) {
 }
 
 func handle(conn net.Conn) {
-	// Enable TCP keepalive on each connection
-	if tcpConn, ok := conn.(*net.TCPConn); ok {
-		tcpConn.SetKeepAlive(true)
-		tcpConn.SetKeepAlivePeriod(30 * time.Second)
-	}
-	
+	// Enable TCP keepalive on backend connection (toward real backend server)
+	// Do NOT enable on client connection
+
 	defer conn.Close()
 
 	reader := bufio.NewReader(conn)
@@ -347,6 +344,14 @@ func handle(conn net.Conn) {
 		return
 	}
 	defer target.Close()
+
+	// Enable TCP keepalive on backend connection
+	if tcpTarget, ok := target.(*net.TCPConn); ok {
+		tcpTarget.SetKeepAlive(true)
+		tcpTarget.SetKeepAlivePeriod(30 * time.Second)
+	}
+
+	log.Printf("[breath] Backend connected: %s -> %s", path, backend)
 
 	if _, err := target.Write(header.Bytes()); err != nil {
 		return
@@ -408,9 +413,7 @@ func main() {
 	log.Printf("Loaded %d static routes, %d dynamic routes", len(routes), len(dynRoutes))
 
 	addr := fmt.Sprintf(":%d", listenPort)
-	lc := net.ListenConfig{
-		KeepAlive: 30 * time.Second,
-	}
+	lc := net.ListenConfig{}
 	ln, err := lc.Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		log.Fatalf("Listen: %v", err)
