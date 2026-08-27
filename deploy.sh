@@ -1,8 +1,6 @@
 #!/bin/bash
-# ESA Router 安装脚本 v1.3
+# ESA Router 安装脚本 v1.5
 # 用法: curl -sSL https://raw.githubusercontent.com/loensos/esa-router/main/deploy.sh | bash
-
-set -e
 
 VERSION="1.5"
 REPO="loensos/esa-router"
