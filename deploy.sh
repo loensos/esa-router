@@ -4,7 +4,7 @@
 
 set -e
 
-VERSION="1.4"
+VERSION="1.5"
 REPO="loensos/esa-router"
 GITHUB="https://github.com"
 INSTALL_DIR="/opt/esa-router"
@@ -83,11 +83,10 @@ create_config() {
         info "当前配置:"
         cat "$CONFIG_PATH"
     else
-        info "创建默认配置 (v1.3 - 范围匹配)..."
+        info "创建默认配置 (v1.5 - 范围匹配)..."
         cat > "$CONFIG_PATH" << 'EOF'
-# ESA Router v1.3 配置
-# 监听端口
-listen_port = 7826
+# ESA Router v1.5 配置
+# 监听端口 - 由用户设置
 
 [routers]
 # 通配符路由 - 匹配所有 /node-端口 路径

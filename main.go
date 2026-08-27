@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"os/signal"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -296,6 +298,12 @@ func copyConn(src, dst net.Conn, name string, done chan<- error) {
 }
 
 func handle(conn net.Conn) {
+	// Enable TCP keepalive on each connection
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		tcpConn.SetKeepAlive(true)
+		tcpConn.SetKeepAlivePeriod(30 * time.Second)
+	}
+	
 	defer conn.Close()
 
 	reader := bufio.NewReader(conn)
@@ -361,6 +369,31 @@ func main() {
 	log.SetFlags(log.Ltime | log.Lmsgprefix)
 	log.SetPrefix("[router] ")
 
+	// 解析命令行参数
+	for i := 0; i < len(os.Args); i++ {
+		arg := os.Args[i]
+		if arg == "--port" && i+1 < len(os.Args) {
+			port, err := strconv.Atoi(os.Args[i+1])
+			if err == nil && port > 0 {
+				listenPort = port
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--port=") {
+			port, err := strconv.Atoi(strings.TrimPrefix(arg, "--port="))
+			if err == nil && port > 0 {
+				listenPort = port
+			}
+		}
+	}
+
+	// 检查环境变量
+	if envPort := os.Getenv("ESA_PORT"); envPort != "" {
+		if port, err := strconv.Atoi(envPort); err == nil && port > 0 {
+			listenPort = port
+		}
+	}
+
+	// 加载配置文件（如果存在）
 	args := os.Args[1:]
 	if len(args) == 0 {
 		configPath = "/etc/esa-router/config.toml"
@@ -375,7 +408,10 @@ func main() {
 	log.Printf("Loaded %d static routes, %d dynamic routes", len(routes), len(dynRoutes))
 
 	addr := fmt.Sprintf(":%d", listenPort)
-	ln, err := net.Listen("tcp", addr)
+	lc := net.ListenConfig{
+		KeepAlive: 30 * time.Second,
+	}
+	ln, err := lc.Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		log.Fatalf("Listen: %v", err)
 	}
