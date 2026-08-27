@@ -231,6 +231,129 @@ check_update() {
     echo "MD5 匹配: $([ "$latest_hash" = "$current_hash" ] && echo '是' || echo '否')"
 }
 
+configure_params() {
+    echo ""
+    info "参数设置"
+    echo ""
+    info "当前配置:"
+    if [ -f "$CONFIG_PATH" ]; then
+        cat "$CONFIG_PATH"
+    else
+        echo "  (无配置文件)"
+    fi
+    echo ""
+
+    read -r -p "是否修改配置? [y/N]: " modify_config
+    if [[ ! "$modify_config" =~ ^[Yy]$ ]]; then
+        info "跳过配置"
+        return
+    fi
+
+    # 修改监听端口
+    local current_port=$(grep 'listen_port' "$CONFIG_PATH" 2>/dev/null | grep -oE '[0-9]+' || echo "7826")
+    read -r -p "监听端口 [$current_port]: " port_input
+    listen_port="${port_input:-$current_port}"
+
+    # 加载现有路由
+    local -a routes=()
+    local route_count=0
+    if [ -f "$CONFIG_PATH" ]; then
+        # 读取 [routers] 部分的路由
+        while IFS= read -r line; do
+            # 匹配带引号的路由行
+            if [[ "$line" =~ ^[[:space:]]*\"[^\"]+\"[[:space:]]*=[[:space:]]*\"[^\"]+\" ]]; then
+                routes+=("$line")
+                route_count=$((route_count + 1))
+            fi
+        done < "$CONFIG_PATH"
+    fi
+
+    while true; do
+        echo ""
+        echo "路由列表 ($route_count 条):"
+        if [ $route_count -eq 0 ]; then
+            echo "  (空)"
+        else
+            for i in "${!routes[@]}"; do
+                echo "  $((i+1)). ${routes[$i]}"
+            done
+        fi
+        echo ""
+        echo "  1) 添加通配符路由 (/node-* 匹配所有端口)"
+        echo "  2) 添加范围路由 (/node-20001-30000)"
+        echo "  3) 添加静态路由 (/node-us -> 指定端口)"
+        echo "  4) 删除路由"
+        echo "  5) 完成并保存"
+        echo ""
+        read -r -p "选择 [1-5]: " route_action
+
+        case $route_action in
+            1)
+                routes+=('\"/node-*\" = \"127.0.0.1:<port>\"')
+                route_count=$((route_count + 1))
+                info "已添加: /node-*"
+                ;;
+            2)
+                read -r -p "端口范围 (如 20001-30000) [20001-40000]: " range_input
+                range="${range_input:-20001-40000}"
+                routes+=("\"/node-$range\" = \"127.0.0.1:<port>\"")
+                route_count=$((route_count + 1))
+                info "已添加: /node-$range"
+                ;;
+            3)
+                info "静态模式示例: /node-us = 127.0.0.1:30927"
+                read -r -p "请输入路由规则 (如 '/node-us' = '127.0.0.1:30927'): " static_rule
+                if [ -n "$static_rule" ]; then
+                    # 去除首尾空格并添加引号
+                    static_rule=$(echo "$static_rule" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                    route_entry=$(echo "$static_rule" | sed 's|^"\\([^"]*\\)"\s*=\s*"\\([^"]*\\)"$|"\1" = "\2"|; s|^"\\([^"]*\\)"\s*=\s*\(.*\)$|"\1" = "\2"|; s|^\([^=]*\)\s*=\s*\(.*\)$|"\1" = "\2"|')
+                    routes+=("$route_entry")
+                    route_count=$((route_count + 1))
+                    info "已添加: $route_entry"
+                fi
+                ;;
+            4)
+                if [ $route_count -eq 0 ]; then
+                    warn "没有可删除的路由"
+                    continue
+                fi
+                echo ""
+                read -r -p "删除第几条 [1-$route_count]: " del_idx
+                if [[ "$del_idx" =~ ^[0-9]+$ ]] && [ "$del_idx" -ge 1 ] && [ "$del_idx" -le "$route_count" ]; then
+                    unset 'routes[$((del_idx-1))]'
+                    routes=("${routes[@]}")
+                    route_count=$((route_count - 1))
+                    info "已删除路由 #$del_idx"
+                fi
+                ;;
+            5)
+                break
+                ;;
+            *)
+                warn "无效选择"
+                ;;
+        esac
+    done
+
+    # 生成配置文件
+    info "创建配置文件..."
+    {
+        echo "# ESA Router v1.5 配置"
+        echo "listen_port = $listen_port"
+        echo ""
+        echo "[routers]"
+        for route in "${routes[@]}"; do
+            echo "$route"
+        done
+    } > "$CONFIG_PATH"
+    info "配置已更新: $CONFIG_PATH"
+
+    # 重启服务
+    systemctl restart "$SERVICE_NAME" 2>/dev/null || nohup /usr/local/bin/esa-router /etc/esa-router/config.toml > /var/log/esa-router.log 2>&1 &
+    sleep 1
+    info "服务已重启"
+}
+
 # 检测管道模式
 if [ ! -t 0 ]; then
     echo "==================================="
