@@ -146,6 +146,16 @@ func copyConn(dst, src net.Conn, dir string, errChan chan<- error) {
 }
 
 func handle(conn net.Conn) {
+	// Enable TCP keepalive on client connection (toward ESA/CDN)
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		tcpConn.SetKeepAlive(true)
+		tcpConn.SetKeepAlivePeriod(30 * time.Second)
+	}
+
+	localAddr := conn.LocalAddr().String()
+	remoteAddr := conn.RemoteAddr().String()
+	log.Printf("[breath] Client connected: %s <- %s", localAddr, remoteAddr)
+
 	defer conn.Close()
 
 	reader := bufio.NewReader(conn)
