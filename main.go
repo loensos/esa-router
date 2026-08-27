@@ -245,7 +245,6 @@ func main() {
 	}
 
 	args := os.Args[1:]
-	configPath := "/etc/esa-router/config.toml"
 	if len(args) > 0 {
 		configPath = args[0]
 	}
