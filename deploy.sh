@@ -61,20 +61,18 @@ create_directories() {
 
 download_binary() {
     info "检查二进制文件..."
-    # 优先使用本地编译的二进制
+    # 优先级: 本地脚本目录 > /usr/local/bin (如果已存在且大小正确) > GitHub
     if [ -f "/root/esa-router/esa-router-v1.5" ]; then
-        info "使用本地编译的二进制..."
+        info "使用本地二进制: /root/esa-router/esa-router-v1.5"
         cp "/root/esa-router/esa-router-v1.5" "$BINARY_PATH.new"
+    elif [ -f "$BINARY_PATH" ] && [ "$(stat -c%s "$BINARY_PATH" 2>/dev/null)" -gt 1000000 ]; then
+        info "使用现有二进制: $BINARY_PATH"
+        cp "$BINARY_PATH" "$BINARY_PATH.new"
     else
         info "下载 ESA Router v$VERSION..."
         local url="$GITHUB/$REPO/releases/download/v$VERSION/$BINARY_NAME"
         curl -sL "$url" -o "$BINARY_PATH.new" || {
-            warn "GitHub 下载失败，尝试直接从源码目录复制"
-            if [ -f "/root/esa-router/esa-router-linux-amd64" ]; then
-                cp "/root/esa-router/esa-router-linux-amd64" "$BINARY_PATH.new"
-            else
-                error "无法获取二进制文件，请手动上传"
-            fi
+            error "下载失败，请手动上传二进制文件"
         }
     fi
 
