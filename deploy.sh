@@ -82,21 +82,56 @@ create_config() {
         warn "配置文件已存在，跳过创建: $CONFIG_PATH"
         info "当前配置:"
         cat "$CONFIG_PATH"
-    else
-        info "创建默认配置 (v1.5)..."
-        cat > "$CONFIG_PATH" << 'EOF'
+        return
+    fi
+
+    info "配置 ESA Router..."
+
+    # 询问监听端口
+    read -r -p "监听端口 [7826]: " port_input
+    listen_port="${port_input:-7826}"
+
+    # 询问路由模式
+    echo ""
+    echo "请选择路由模式:"
+    echo "  1) 通配符模式 (/node-* 匹配所有端口)"
+    echo "  2) 范围模式 (/node-20001-30000 匹配指定范围)"
+    echo "  3) 静态模式 (/node-us -> 指定端口)"
+    echo ""
+    read -r -p "选择 [1-3]: " route_mode
+
+    case $route_mode in
+        1)
+            route_config='"/node-*" = "127.0.0.1:<port>"'
+            ;;
+        2)
+            read -r -p "端口范围 (如 20001-30000) [20001-40000]: " range_input
+            range="${range_input:-20001-40000}"
+            route_config="\"/node-$range\" = \"127.0.0.1:<port>\""
+            ;;
+        3)
+            info "静态模式示例: /node-us = 127.0.0.1:30927"
+            read -r -p "请输入路由规则 (如 '/node-us' = '127.0.0.1:30927'): " static_rule
+            if [ -z "$static_rule" ]; then
+                static_rule='"/node-us" = "127.0.0.1:30927"'
+            fi
+            route_config="$static_rule"
+            ;;
+        *)
+            route_config='"/node-*" = "127.0.0.1:<port>"'
+            warn "无效选择，使用默认通配符模式"
+            ;;
+    esac
+
+    info "创建配置文件..."
+    cat > "$CONFIG_PATH" << EOF
 # ESA Router v1.5 配置
-# 监听端口
-listen_port = 7826
+listen_port = $listen_port
 
 [routers]
-# 通配符路由 - 匹配所有 /node-端口 路径
-"/node-*" = "127.0.0.1:<port>"
-# 范围路由 - 只接受 20001-30000 端口（优先于通配符）
-"/node-20001-30000" = "127.0.0.1:<port>"
+$route_config
 EOF
-        info "配置已创建: $CONFIG_PATH"
-    fi
+    info "配置已创建: $CONFIG_PATH"
 }
 
 install_service() {
