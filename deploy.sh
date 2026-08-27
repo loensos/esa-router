@@ -309,7 +309,7 @@ configure_params() {
                     # 如果没有引号，自动添加
                     if [[ "$static_rule" != *\"* ]]; then
                         # 格式: /path = ip:port
-                        route_entry=$(echo "$static_rule" | sed -E 's|^([^=]+)=(.*)$|"\1" = "\2"|; s/ //g')
+                        route_entry=$(echo "$static_rule" | sed 's|^\([^=]*\)=\(.*\)$|"\1" = "\2"|; s/ //g')
                     else
                         route_entry="$static_rule"
                     fi
