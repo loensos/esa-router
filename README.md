@@ -1,11 +1,22 @@
-# ESA Router v1.4
+# ESA Router v1.5.1
 
-WebSocket Path 路由器：按路径动态路由到不同后端，支持范围匹配。
+TCP 透传路由器：按 WebSocket 路径动态路由到不同后端，支持范围匹配和 TCP Keepalive。
 1、支持trojan+ws、vless+ws、vmess+ws等，落地协议不能配置tls。
 2、ws路径写/node-端口，端口为转发端口不是落地端口，当然也可以/abc-20000 /abc与esa 回源规则一致即可。
 3、在vpn软件里打开tls。tls的域名填写esa的域名 端口443。
 4、esa回源规则：A、传入请求类型～选自定义规则～选url路径～开头为～/node ( node为例子，可为任意固定值，如此才能动态选端口。)
 B、回源协议和端口～回源协议选 http ～ http端口可为任意端口，不与落地转发端口一样就行。
+
+## v1.5.1 新增功能
+
+### TCP Keepalive
+- 向阿里云 ESA/CDN 方向发送探测包，防止空闲断开
+- 探测间隔：30 秒
+- 日志：`[breath] 向 ESA 探测: <IP> <- :1000 (30秒间隔)`
+
+### CLI 参数支持
+- `--port=1000`: 指定监听端口
+- `ESA_PORT=1000`: 环境变量指定端口
 
 ## v1.4 新增功能
 
@@ -28,6 +39,8 @@ B、回源协议和端口～回源协议选 http ～ http端口可为任意端�
 - ✅ 范围匹配 `/node-20001-30000`
 - ✅ 范围优先于通配符
 - ✅ 自身端口保护（防止循环）
+- ✅ TCP Keepalive (向 ESA/CDN 方向，30秒间隔)
+- ✅ CLI 参数支持 (--port, ESA_PORT)
 
 ## 安装
 
@@ -41,7 +54,7 @@ curl -sSL https://raw.githubusercontent.com/loensos/esa-router/main/deploy.sh | 
 
 ```bash
 # 下载预编译二进制
-wget https://github.com/loensos/esa-router/releases/download/v1.4/esa-router-linux-amd64
+wget https://github.com/loensos/esa-router/releases/download/v1.5.1/esa-router-v1.5-linux-amd64
 chmod +x esa-router-linux-amd64
 mv esa-router-linux-amd64 /opt/esa-router/esa-router
 ```
@@ -119,6 +132,7 @@ systemctl restart esa-router
 
 ## Release 版本
 
+- [v1.5.1](https://github.com/loensos/esa-router/releases/tag/v1.5.1) - TCP Keepalive，CLI 参数支持
 - [v1.4](https://github.com/loensos/esa-router/releases/tag/v1.4) - 范围匹配优先于通配符
 - [v1.2](https://github.com/loensos/esa-router/releases/tag/v1.2) - 动态路由，端口热拔插
 - [v1.1](https://github.com/loensos/esa-router/releases/tag/v1.1) - 标准 TOML 配置，SIGHUP 热重载
