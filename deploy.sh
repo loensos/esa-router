@@ -441,12 +441,4 @@ if [ -t 0 ]; then
             error "无效选择"
             ;;
     esac
-else
-    # 非交互模式（管道安装）
-    check_root
-    check_os
-    check_arch
-    install_dependencies
-    create_directories
-    install_full
 fi
