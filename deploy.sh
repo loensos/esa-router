@@ -268,12 +268,14 @@ configure_params() {
     local -a routes=()
     local route_count=0
     if [ -f "$CONFIG_PATH" ]; then
+        # 读取 [routers] 部分的路由
         while IFS= read -r line; do
-            if [[ "$line" =~ ^\".*\".*=.* ]]; then
+            # 匹配带引号的路由行
+            if [[ "$line" =~ ^[[:space:]]*\"[^\"]+\"[[:space:]]*=[[:space:]]*\"[^\"]+\" ]]; then
                 routes+=("$line")
                 route_count=$((route_count + 1))
             fi
-        done < <(grep -E '^\s*"[/].*"' "$CONFIG_PATH" 2>/dev/null)
+        done < "$CONFIG_PATH"
     fi
 
     while true; do
