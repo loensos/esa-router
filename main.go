@@ -244,9 +244,9 @@ func main() {
 		}
 	}
 
-	args := os.Args[1:]
-	if len(args) > 0 {
-		configPath = args[0]
+	configPath := "/etc/esa-router/config.toml"
+	if len(os.Args) > 1 {
+		configPath = os.Args[1]
 	}
 
 	if err := loadConfig(); err != nil {
