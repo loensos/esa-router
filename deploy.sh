@@ -208,15 +208,20 @@ show_usage() {
 update_mode() {
     echo ""
     echo "选择更新模式:"
-    echo "  1) 完整安装 (更新二进制+配置)"
+    echo "  1) 完整安装 (更新二进制+重新配置)"
     echo "  2) 仅更新二进制"
     echo "  3) 检查更新"
     echo "  4) 退出"
     echo ""
-    
+
     read -r -p "请选择 [1-4]: " choice
     case $choice in
-        1) install_full ;;
+        1)
+            download_binary
+            create_config
+            systemctl restart "$SERVICE_NAME" 2>/dev/null || nohup /usr/local/bin/esa-router /etc/esa-router/config.toml > /var/log/esa-router.log 2>&1 &
+            info "二进制和配置已更新，服务已重启"
+            ;;
         2) update_binary_only ;;
         3) check_update ;;
         4) echo "退出"; exit 0 ;;
