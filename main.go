@@ -192,6 +192,8 @@ func handle(conn net.Conn) {
 		return
 	}
 
+	log.Printf("[breath] 客户端方向探测: %s -> ESA/CDN (保持连接)", remoteAddr)
+
 	target, err := net.DialTimeout("tcp", backend, connectTO)
 	if err != nil {
 		return
