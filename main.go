@@ -192,7 +192,8 @@ func handle(conn net.Conn) {
 		return
 	}
 
-	log.Printf("[breath] 客户端方向探测: %s -> ESA/CDN (保持连接)", remoteAddr)
+	// 向 ESA/CDN 方向发送 Keepalive 探测，防止空闲断开
+	log.Printf("[breath] 向 ESA 探测: %s <- :1000 (30秒间隔)", remoteAddr)
 
 	target, err := net.DialTimeout("tcp", backend, connectTO)
 	if err != nil {
