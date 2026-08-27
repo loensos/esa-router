@@ -391,22 +391,20 @@ check_update() {
     echo "MD5 匹配: $([ "$latest_hash" = "$current_hash" ] && echo '是' || echo '否')"
 }
 
-# 交互模式检测
-if [ -t 0 ]; then
-    echo "==================================="
-    echo "  ESA Router v$VERSION 管理脚本"
-    echo "==================================="
-    echo ""
-    echo "1) 全新安装"
-    echo "2) 更新二进制"
-    echo "3) 设置参数"
-    echo "4) 检查更新"
-    echo "5) 退出"
-    echo ""
+echo "==================================="
+echo "  ESA Router v$VERSION 管理脚本"
+echo "==================================="
+echo ""
+echo "1) 全新安装"
+echo "2) 更新二进制"
+echo "3) 设置参数"
+echo "4) 检查更新"
+echo "5) 退出"
+echo ""
 
-    read -r -p "请选择 [1-5]: " choice
+read -r -p "请选择 [1-5]: " choice
 
-    case $choice in
+case $choice in
         1)
             check_root
             check_os
@@ -437,8 +435,7 @@ if [ -t 0 ]; then
             echo "退出"
             exit 0
             ;;
-        *)
-            error "无效选择"
-            ;;
-    esac
-fi
+        * )
+                    error "无效选择"
+                    ;;
+            esac
