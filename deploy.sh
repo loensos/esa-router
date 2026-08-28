@@ -10,7 +10,7 @@ INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/esa-router"
 SERVICE_NAME="esa-router"
 
-BINARY_NAME="esa-router-linux-amd64"
+BINARY_NAME="esa-router-v1.5-linux-amd64"
 BINARY_PATH="$INSTALL_DIR/esa-router"
 SYMLINK_PATH="$INSTALL_DIR/esa-router"
 CONFIG_PATH="$CONFIG_DIR/config.toml"
