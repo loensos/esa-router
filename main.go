@@ -381,8 +381,8 @@ func main() {
 			}
 			continue
 		}
-		conn.SetKeepAlive(true)
-		conn.SetKeepAlivePeriod(30 * time.Second)
+		// Keepalive is set via ListenConfig (handled at TCP layer)
+		// handler.Handle will also set it explicitly as a safety net
 		go handler.Handle(conn)
 	}
 }

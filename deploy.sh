@@ -2,7 +2,7 @@
 # ESA Router 安装脚本 v1.5
 # 用法: curl -sSL https://raw.githubusercontent.com/loensos/esa-router/main/deploy.sh -o deploy.sh && bash deploy.sh
 
-VERSION="1.5"
+VERSION="1.5.2"
 REPO="loensos/esa-router"
 GITHUB="https://github.com"
 INSTALL_DIR="/usr/local/bin"
@@ -59,10 +59,21 @@ create_directories() {
 
 download_binary() {
     info "检查二进制文件..."
-    # 优先级: 本地脚本目录 > /usr/local/bin (如果已存在且大小正确) > GitHub
-    if [ -f "/root/esa-router/esa-router-v1.5" ]; then
-        info "使用本地二进制: /root/esa-router/esa-router-v1.5"
-        cp "/root/esa-router/esa-router-v1.5" "$BINARY_PATH.new"
+    # 优先级: 脚本同目录的二进制 > /usr/local/bin (如果已存在且大小正确) > GitHub
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
+    local local_binary=""
+
+    # 查找脚本同目录的二进制文件
+    for f in "$script_dir"/esa-router-v1.5 "$script_dir"/esa-router; do
+        if [ -f "$f" ] && [ "$(stat -c%s "$f" 2>/dev/null)" -gt 1000000 ]; then
+            local_binary="$f"
+            break
+        fi
+    done
+
+    if [ -n "$local_binary" ]; then
+        info "使用本地二进制: $local_binary"
+        cp "$local_binary" "$BINARY_PATH.new"
     elif [ -f "$BINARY_PATH" ] && [ "$(stat -c%s "$BINARY_PATH" 2>/dev/null)" -gt 1000000 ]; then
         info "使用现有二进制: $BINARY_PATH"
         cp "$BINARY_PATH" "$BINARY_PATH.new"
@@ -70,7 +81,7 @@ download_binary() {
         info "从 GitHub API 获取最新 Release..."
         local api_url="$GITHUB/api/repos/$REPO/releases/latest"
         local download_url=$(curl -sL "$api_url" | grep -o '"browser_download_url": "[^"]*' | grep "$BINARY_NAME" | cut -d'"' -f4 | head -1)
-        
+
         if [ -z "$download_url" ]; then
             # Fallback to versioned URL
             download_url="$GITHUB/$REPO/releases/download/v$VERSION/$BINARY_NAME"
@@ -78,7 +89,7 @@ download_binary() {
         else
             info "获取到下载链接: $download_url"
         fi
-        
+
         curl -sL "$download_url" -o "$BINARY_PATH.new" || {
             error "下载失败，请手动上传二进制文件"
         }
@@ -229,6 +240,57 @@ update_binary_only() {
     download_binary
     systemctl restart "$SERVICE_NAME"
     info "二进制已更新，服务已重启"
+}
+
+uninstall() {
+    check_root
+    echo ""
+    warn "即将卸载 ESA Router v$VERSION"
+    warn "这将删除: 二进制文件、配置目录、systemd 服务"
+    echo ""
+    read -r -p "确认卸载? [y/N]: " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        info "取消卸载"
+        return
+    fi
+
+    # Stop and disable service
+    if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+        info "停止服务..."
+        systemctl stop "$SERVICE_NAME"
+    fi
+    if systemctl is-enabled --quiet "$SERVICE_NAME" 2>/dev/null; then
+        info "禁用服务..."
+        systemctl disable "$SERVICE_NAME"
+    fi
+
+    # Remove systemd service file
+    if [ -f /etc/systemd/system/$SERVICE_NAME.service ]; then
+        info "删除 systemd 服务文件..."
+        rm -f /etc/systemd/system/$SERVICE_NAME.service
+        systemctl daemon-reload
+    fi
+
+    # Backup config
+    if [ -f "$CONFIG_PATH" ]; then
+        local backup_path="${CONFIG_PATH}.backup.$(date +%Y%m%d%H%M%S)"
+        info "备份配置到: $backup_path"
+        cp "$CONFIG_PATH" "$backup_path"
+    fi
+
+    # Remove files
+    if [ -f "$BINARY_PATH" ]; then
+        info "删除二进制: $BINARY_PATH"
+        rm -f "$BINARY_PATH"
+    fi
+    if [ -d "$CONFIG_DIR" ]; then
+        info "删除配置目录: $CONFIG_DIR"
+        rm -rf "$CONFIG_DIR"
+    fi
+
+    echo ""
+    info "卸载完成！"
+    info "配置已备份到 ${CONFIG_PATH}.backup.*"
 }
 
 check_update() {
@@ -403,10 +465,11 @@ echo "1) 全新安装"
 echo "2) 更新二进制"
 echo "3) 设置参数"
 echo "4) 检查更新"
-echo "5) 退出"
+echo "5) 卸载"
+echo "6) 退出"
 echo ""
 
-read -r -p "请选择 [1-5]: " choice
+read -r -p "请选择 [1-6]: " choice
 
 case $choice in
     1)
@@ -436,6 +499,9 @@ case $choice in
         check_update
         ;;
     5)
+        uninstall
+        ;;
+    6)
         echo "退出"
         exit 0
         ;;
