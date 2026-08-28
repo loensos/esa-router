@@ -74,12 +74,12 @@ download_binary() {
     # 2. 检查 GitHub 是否有更新的版本
     info "检查 GitHub 最新版本..."
     local api_url="$GITHUB/api/repos/$REPO/releases/latest"
-    local remote_url=$(curl -sL "$api_url" 2>/dev/null | grep -o '"browser_download_url": "[^"]*' | grep "$BINARY_NAME" | cut -d'"' -f4 | head -1)
+    local remote_url=$(curl -sL "$api_url" 2>&1 | grep -o '"browser_download_url": "[^"]*' | grep "$BINARY_NAME" | cut -d'"' -f4 | head -1)
 
     if [ -n "$remote_url" ]; then
         # 临时下载到 /tmp 比较 MD5
         local tmp_bin="/tmp/esa-router-latest"
-        curl -sL "$remote_url" -o "$tmp_bin" 2>/dev/null
+        curl -sL "$remote_url" -o "$tmp_bin" 2>&1 | tail -3
         if [ -s "$tmp_bin" ]; then
             local remote_md5=$(md5sum "$tmp_bin" | awk '{print $1}')
             local remote_size=$(stat -c%s "$tmp_bin" 2>/dev/null)
