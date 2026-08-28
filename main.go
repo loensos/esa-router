@@ -175,7 +175,11 @@ func (r *Router) FindRoute(path string) (string, bool) {
 			}
 		case RouteTypeWildcard:
 			if strings.Contains(route.Pattern, "*") {
-				return fmt.Sprintf("127.0.0.1:%s", trimmed), true
+				// Extract port from path (e.g., /node-30925 -> 30925)
+				port := strings.TrimPrefix(trimmed, "node-")
+				// Replace <port> in backend template
+				backend := strings.Replace(route.Backend, "<port>", port, 1)
+				return backend, true
 			}
 		}
 	}
