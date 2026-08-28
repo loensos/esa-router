@@ -335,18 +335,37 @@ configure_params() {
     listen_port="${port_input:-$current_port}"
 
     # 加载现有路由
-    local -a routes=()
-    local route_count=0
-    if [ -f "$CONFIG_PATH" ]; then
-        # 读取 [routers] 部分的路由
-        while IFS= read -r line; do
-                    # 匹配带引号的路由行 (旧格式) 或新 TOML 格式
-                    if [[ "$line" =~ ^[[:space:]]*\\\"[^\\\"]+\\\"[[:space:]]*=[[:space:]]*\\\"[^\\\"]+\\\" ]] || [[ "$line" =~ ^[[:space:]]*\{.*path.*backend.*\} ]]; then
-                        routes+=("$line")
-                        route_count=$((route_count + 1))
-                    fi
-                done < "$CONFIG_PATH"
-            fi
+        local -a routes=()
+        local route_count=0
+        if [ -f "$CONFIG_PATH" ]; then
+            # 读取路由 - 支持新旧两种格式
+            # 旧格式: "/node-xxx" = "127.0.0.1:port"
+            # 新格式: { path = "/node-xxx", backend = "127.0.0.1:port" }
+            #         { path = "/node-xxx", backend = "127.0.0.1:<port>", min_port = N, max_port = M }
+            while IFS= read -r line; do
+                # 跳过空行和注释
+                [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+                # 跳过 section 标记
+                [[ "$line" =~ ^[[:space:]]*\[.*\] ]] && continue
+                # 跳过 [[routers]] 数组标记
+                [[ "$line" =~ ^[[:space:]]*\[\[.*\]\] ]] && continue
+
+                # 匹配新格式: { path = ..., backend = ... }
+                if [[ "$line" =~ ^[[:space:]]*\{[[:space:]]*path[[:space:]]*= ]]; then
+                    routes+=("$line")
+                    route_count=$((route_count + 1))
+                    continue
+                fi
+
+                # 匹配旧格式: "path" = "backend"
+                if [[ "$line" =~ ^[[:space:]]*\"[^\"]+\"[[:space:]]*=[[:space:]]*\"[^\"]+\" ]]; then
+                    # 转换为新格式
+                    local path_part=$(echo "$line" | sed -E 's|^[[:space:]]*"([^"]+)"[[:space:]]*=[[:space:]]*"([^"]+)".*|{ path = "\1", backend = "\2" }|')
+                    routes+=("$path_part")
+                    route_count=$((route_count + 1))
+                fi
+            done < "$CONFIG_PATH"
+        fi
 
             while true; do
                 echo ""
@@ -426,7 +445,7 @@ configure_params() {
     # 生成配置文件
     info "创建配置文件..."
     {
-        echo "# ESA Router v1.5 配置"
+        echo "# ESA Router v1.5.2 配置"
         echo "listen_port = $listen_port"
         echo ""
         echo "[[routers]]"
