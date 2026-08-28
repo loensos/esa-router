@@ -7,28 +7,6 @@ TCP 透传路由器：按 WebSocket 路径动态路由到不同后端，支持�
 4、esa回源规则：A、传入请求类型～选自定义规则～选url路径～开头为～/node ( node为例子，可为任意固定值，如此才能动态选端口。)
 B、回源协议和端口～回源协议选 http ～ http端口可为任意端口，不与落地转发端口一样就行。
 
-## v1.5.1 新增功能
-
-### TCP Keepalive
-- 向阿里云 ESA/CDN 方向发送探测包，防止空闲断开
-- 探测间隔：30 秒
-- 日志：`[breath] 向 ESA 探测: <IP> <- :1000 (30秒间隔)`
-
-### CLI 参数支持
-- `--port=1000`: 指定监听端口
-- `ESA_PORT=1000`: 环境变量指定端口
-
-## v1.4 新增功能
-
-### 范围匹配
-- `/node-20001-30000` → 只接受 20001-30000 端口的路径
-- 范围匹配优先于通配符
-- 超出范围的端口会被拒绝
-
-### 动态路由
-- `/node-*` → 自动提取路径中的端口号，路由到 `127.0.0.1:<port>`
-- 端口热拔插：后端端口变更无需修改路由器配置
-
 ## 功能特性
 
 - ✅ 配置文件路由 (config.toml)
@@ -133,14 +111,6 @@ kill -1 $(pgrep esa-router)
 # 或重启服务
 systemctl restart esa-router
 ```
-
-## Release 版本
-
-- [v1.5.1](https://github.com/loensos/esa-router/releases/tag/v1.5.1) - TCP Keepalive，CLI 参数支持
-- [v1.4](https://github.com/loensos/esa-router/releases/tag/v1.4) - 范围匹配优先于通配符
-- [v1.2](https://github.com/loensos/esa-router/releases/tag/v1.2) - 动态路由，端口热拔插
-- [v1.1](https://github.com/loensos/esa-router/releases/tag/v1.1) - 标准 TOML 配置，SIGHUP 热重载
-- [v1.0](https://github.com/loensos/esa-router/releases/tag/v1.0) - 初始版本
 
 ## 示例场景
 
