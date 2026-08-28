@@ -59,11 +59,11 @@ create_directories() {
 
 download_binary() {
     info "检查二进制文件..."
-    # 优先级: 脚本同目录的二进制 > /usr/local/bin (如果已存在且大小正确) > GitHub
+    # 优先级: 脚本同目录的二进制 > GitHub 最新 > /usr/local/bin 现有
     local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
     local local_binary=""
 
-    # 查找脚本同目录的二进制文件
+    # 1. 优先：脚本同目录的二进制
     for f in "$script_dir"/esa-router-v1.5 "$script_dir"/esa-router; do
         if [ -f "$f" ] && [ "$(stat -c%s "$f" 2>/dev/null)" -gt 1000000 ]; then
             local_binary="$f"
@@ -71,28 +71,65 @@ download_binary() {
         fi
     done
 
-    if [ -n "$local_binary" ]; then
-        info "使用本地二进制: $local_binary"
-        cp "$local_binary" "$BINARY_PATH.new"
-    elif [ -f "$BINARY_PATH" ] && [ "$(stat -c%s "$BINARY_PATH" 2>/dev/null)" -gt 1000000 ]; then
-        info "使用现有二进制: $BINARY_PATH"
-        cp "$BINARY_PATH" "$BINARY_PATH.new"
-    else
-        info "从 GitHub API 获取最新 Release..."
-        local api_url="$GITHUB/api/repos/$REPO/releases/latest"
-        local download_url=$(curl -sL "$api_url" | grep -o '"browser_download_url": "[^"]*' | grep "$BINARY_NAME" | cut -d'"' -f4 | head -1)
+    # 2. 检查 GitHub 是否有更新的版本
+    info "检查 GitHub 最新版本..."
+    local api_url="$GITHUB/api/repos/$REPO/releases/latest"
+    local remote_url=$(curl -sL "$api_url" 2>/dev/null | grep -o '"browser_download_url": "[^"]*' | grep "$BINARY_NAME" | cut -d'"' -f4 | head -1)
 
-        if [ -z "$download_url" ]; then
-            # Fallback to versioned URL
-            download_url="$GITHUB/$REPO/releases/download/v$VERSION/$BINARY_NAME"
-            info "API 获取失败，使用版本化 URL: $download_url"
+    if [ -n "$remote_url" ]; then
+        # 临时下载到 /tmp 比较 MD5
+        local tmp_bin="/tmp/esa-router-latest"
+        curl -sL "$remote_url" -o "$tmp_bin" 2>/dev/null
+        if [ -s "$tmp_bin" ]; then
+            local remote_md5=$(md5sum "$tmp_bin" | awk '{print $1}')
+            local remote_size=$(stat -c%s "$tmp_bin" 2>/dev/null)
+            local local_md5=""
+            if [ -n "$local_binary" ]; then
+                local_md5=$(md5sum "$local_binary" | awk '{print $1}')
+            elif [ -f "$BINARY_PATH" ] && [ "$(stat -c%s "$BINARY_PATH" 2>/dev/null)" -gt 1000000 ]; then
+                local_md5=$(md5sum "$BINARY_PATH" | awk '{print $1}')
+            fi
+
+            if [ "$remote_md5" = "$local_md5" ]; then
+                # 本地 = 远程最新版本
+                if [ -n "$local_binary" ]; then
+                    info "本地已是最新版本: $local_binary"
+                    cp "$local_binary" "$BINARY_PATH.new"
+                else
+                    info "现有二进制已是最新版本"
+                    cp "$BINARY_PATH" "$BINARY_PATH.new"
+                fi
+                rm -f "$tmp_bin"
+            else
+                # 本地不是最新，使用 GitHub 下载的
+                info "从 GitHub 下载最新版本 (本地 MD5 不匹配)"
+                mv "$tmp_bin" "$BINARY_PATH.new"
+            fi
         else
-            info "获取到下载链接: $download_url"
+            # 下载失败，回退到本地
+            rm -f "$tmp_bin"
+            if [ -n "$local_binary" ]; then
+                info "GitHub 下载失败，使用本地: $local_binary"
+                cp "$local_binary" "$BINARY_PATH.new"
+            elif [ -f "$BINARY_PATH" ] && [ "$(stat -c%s "$BINARY_PATH" 2>/dev/null)" -gt 1000000 ]; then
+                info "GitHub 下载失败，使用现有: $BINARY_PATH"
+                cp "$BINARY_PATH" "$BINARY_PATH.new"
+            else
+                error "GitHub 下载失败且无本地备份"
+            fi
         fi
-
-        curl -sL "$download_url" -o "$BINARY_PATH.new" || {
-            error "下载失败，请手动上传二进制文件"
-        }
+    else
+        # API 调用失败，回退到本地
+        rm -f /tmp/esa-router-latest 2>/dev/null
+        if [ -n "$local_binary" ]; then
+            info "GitHub API 失败，使用本地: $local_binary"
+            cp "$local_binary" "$BINARY_PATH.new"
+        elif [ -f "$BINARY_PATH" ] && [ "$(stat -c%s "$BINARY_PATH" 2>/dev/null)" -gt 1000000 ]; then
+            info "GitHub API 失败，使用现有: $BINARY_PATH"
+            cp "$BINARY_PATH" "$BINARY_PATH.new"
+        else
+            error "GitHub API 失败且无本地备份"
+        fi
     fi
 
     # 验证文件
