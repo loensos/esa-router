@@ -59,7 +59,7 @@ create_directories() {
 
 download_binary() {
     info "从 GitHub 下载最新版本..."
-    local api_url="$GITHUB/api/repos/$REPO/releases/latest"
+    local api_url="$GITHUB/repos/$REPO/releases/latest"
     local remote_url=$(curl -sL "$api_url" | grep -o '"browser_download_url": "[^"]*' | grep "$BINARY_NAME" | cut -d'"' -f4 | head -1)
 
     if [ -z "$remote_url" ]; then
@@ -280,7 +280,7 @@ uninstall() {
 
 check_update() {
     info "检查最新版本..."
-    local api_url="$GITHUB/api/repos/$REPO/releases/latest"
+    local api_url="$GITHUB/repos/$REPO/releases/latest"
     local download_url=$(curl -sL "$api_url" | grep -o '"browser_download_url": "[^"]*' | grep "$BINARY_NAME" | cut -d'"' -f4 | head -1)
     
     if [ -z "$download_url" ]; then
