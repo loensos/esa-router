@@ -4,7 +4,7 @@
 
 VERSION="1.5.2"
 REPO="loensos/esa-router"
-GITHUB="https://github.com"
+GITHUB="https://api.github.com"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/esa-router"
 SERVICE_NAME="esa-router"
