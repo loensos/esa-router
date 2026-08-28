@@ -1,16 +1,8 @@
 #!/bin/bash
-# ESA Router 安装脚本 v1.5
-# 用法: curl -sSL "https://raw.githubusercontent.com/loensos/esa-router/main/deploy.sh?nocache=$(date +%s)" -o deploy.sh && bash deploy.sh
-
-# Self-check: ensure this is the latest version
-LATEST_COMMIT="3702d1e917bec07ba4189cdde0d6931bbecc9812"
-CURRENT_COMMIT=$(curl -sL "https://api.github.com/repos/loensos/esa-router/commits/main" 2>/dev/null | grep -o '"sha": "[a-f0-9]*"' | head -1 | cut -d'"' -f4)
-if [ -n "$CURRENT_COMMIT" ] && [ "$CURRENT_COMMIT" != "$LATEST_COMMIT" ]; then
-    echo "WARNING: This script version may be outdated."
-    echo "  Latest: $LATEST_COMMIT"
-    echo "  Got:    $CURRENT_COMMIT"
-    echo "  Try: curl -sSL 'https://raw.githubusercontent.com/loensos/esa-router/main/deploy.sh?nocache='\$(date +%s) -o deploy.sh"
-fi
+# ESA Router 安装脚本 v1.5.2
+# 用法 (使用 GitHub API 避免 CDN 缓存):
+#   curl -sL https://api.github.com/repos/loensos/esa-router/contents/deploy.sh -o deploy.sh
+#   bash deploy.sh
 
 VERSION="1.5.2"
 REPO="loensos/esa-router"
