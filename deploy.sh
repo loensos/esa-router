@@ -58,89 +58,37 @@ create_directories() {
 }
 
 download_binary() {
-    info "检查二进制文件..."
-    # 优先级: 脚本同目录的二进制 > GitHub 最新 > /usr/local/bin 现有
-    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
-    local local_binary=""
-
-    # 1. 优先：脚本同目录的二进制
-    for f in "$script_dir"/esa-router-v1.5 "$script_dir"/esa-router; do
-        if [ -f "$f" ] && [ "$(stat -c%s "$f" 2>/dev/null)" -gt 1000000 ]; then
-            local_binary="$f"
-            break
-        fi
-    done
-
-    # 2. 检查 GitHub 是否有更新的版本
-    info "检查 GitHub 最新版本..."
+    info "从 GitHub 下载最新版本..."
     local api_url="$GITHUB/api/repos/$REPO/releases/latest"
     local remote_url=$(curl -sL "$api_url" 2>&1 | grep -o '"browser_download_url": "[^"]*' | grep "$BINARY_NAME" | cut -d'"' -f4 | head -1)
 
-    if [ -n "$remote_url" ]; then
-        # 临时下载到 /tmp 比较 MD5
-        local tmp_bin="/tmp/esa-router-latest"
-        curl -sL "$remote_url" -o "$tmp_bin" 2>&1 | tail -3
-        if [ -s "$tmp_bin" ]; then
-            local remote_md5=$(md5sum "$tmp_bin" | awk '{print $1}')
-            local remote_size=$(stat -c%s "$tmp_bin" 2>/dev/null)
-            local local_md5=""
-            if [ -n "$local_binary" ]; then
-                local_md5=$(md5sum "$local_binary" | awk '{print $1}')
-            elif [ -f "$BINARY_PATH" ] && [ "$(stat -c%s "$BINARY_PATH" 2>/dev/null)" -gt 1000000 ]; then
-                local_md5=$(md5sum "$BINARY_PATH" | awk '{print $1}')
-            fi
-
-            if [ "$remote_md5" = "$local_md5" ]; then
-                # 本地 = 远程最新版本
-                if [ -n "$local_binary" ]; then
-                    info "本地已是最新版本: $local_binary"
-                    cp "$local_binary" "$BINARY_PATH.new"
-                else
-                    info "现有二进制已是最新版本"
-                    cp "$BINARY_PATH" "$BINARY_PATH.new"
-                fi
-                rm -f "$tmp_bin"
-            else
-                # 本地不是最新，使用 GitHub 下载的
-                info "从 GitHub 下载最新版本 (本地 MD5 不匹配)"
-                mv "$tmp_bin" "$BINARY_PATH.new"
-            fi
-        else
-            # 下载失败，回退到本地
-            rm -f "$tmp_bin"
-            if [ -n "$local_binary" ]; then
-                info "GitHub 下载失败，使用本地: $local_binary"
-                cp "$local_binary" "$BINARY_PATH.new"
-            elif [ -f "$BINARY_PATH" ] && [ "$(stat -c%s "$BINARY_PATH" 2>/dev/null)" -gt 1000000 ]; then
-                info "GitHub 下载失败，使用现有: $BINARY_PATH"
-                cp "$BINARY_PATH" "$BINARY_PATH.new"
-            else
-                error "GitHub 下载失败且无本地备份"
-            fi
-        fi
-    else
-        # API 调用失败，回退到本地
-        rm -f /tmp/esa-router-latest 2>/dev/null
-        if [ -n "$local_binary" ]; then
-            info "GitHub API 失败，使用本地: $local_binary"
-            cp "$local_binary" "$BINARY_PATH.new"
-        elif [ -f "$BINARY_PATH" ] && [ "$(stat -c%s "$BINARY_PATH" 2>/dev/null)" -gt 1000000 ]; then
-            info "GitHub API 失败，使用现有: $BINARY_PATH"
-            cp "$BINARY_PATH" "$BINARY_PATH.new"
-        else
-            error "GitHub API 失败且无本地备份"
-        fi
+    if [ -z "$remote_url" ]; then
+        # Fallback to versioned URL
+        remote_url="$GITHUB/$REPO/releases/download/v$VERSION/$BINARY_NAME"
+        warn "API 获取失败，使用版本化 URL: $remote_url"
     fi
 
-    # 验证文件
-    if [ ! -s "$BINARY_PATH.new" ]; then
+    # 强制从 GitHub 下载到临时文件
+    local tmp_bin="/tmp/esa-router-latest"
+    rm -f "$tmp_bin"
+    if ! curl -sL "$remote_url" -o "$tmp_bin"; then
+        error "下载失败: $remote_url"
+    fi
+
+    if [ ! -s "$tmp_bin" ]; then
         error "下载的文件为空"
     fi
 
-    chmod +x "$BINARY_PATH.new"
-    mv "$BINARY_PATH.new" "$BINARY_PATH"
+    local remote_size=$(stat -c%s "$tmp_bin" 2>/dev/null)
+    if [ "$remote_size" -lt 1000000 ]; then
+        error "下载文件太小 ($remote_size 字节)，可能不是有效 binary"
+    fi
 
-    info "二进制已安装: $(ls -lh "$BINARY_PATH" | awk '{print $5}')"
+    # 移动到安装位置
+    chmod +x "$tmp_bin"
+    mv "$tmp_bin" "$BINARY_PATH.new"
+
+    info "已从 GitHub 下载: v$VERSION ($(($remote_size / 1024 / 1024))MB)"
 }
 
 create_config() {
