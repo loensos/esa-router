@@ -88,6 +88,7 @@ download_binary() {
     # 移动到安装位置
     chmod +x "$tmp_bin"
     mv "$tmp_bin" "$BINARY_PATH.new"
+    mv "$BINARY_PATH.new" "$BINARY_PATH"
 
     info "已从 GitHub 下载: v$VERSION ($(($remote_size / 1024 / 1024))MB)"
 }
