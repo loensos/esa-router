@@ -123,25 +123,31 @@ create_config() {
 
     case $route_mode in
         1)
-            route_config='{ path = "/node-*", backend = "127.0.0.1:<port>" }'
+            route_config='path = "/node-*"
+backend = "127.0.0.1:<port>"'
             ;;
         2)
             read -r -p "端口范围起始 (如 20001) [20001]: " min_port_input
             min_port="${min_port_input:-20001}"
             read -r -p "端口范围结束 (如 50000) [50000]: " max_port_input
             max_port="${max_port_input:-50000}"
-            route_config="{ path = \"/node-\", backend = \"127.0.0.1:<port>\", min_port = $min_port, max_port = $max_port }"
+            route_config="path = \"/node-\"
+backend = \"127.0.0.1:<port>\"
+min_port = $min_port
+max_port = $max_port"
             ;;
         3)
             info "静态模式示例: /node-us = 127.0.0.1:30927"
             read -r -p "请输入路由规则 (如 '/node-us' = '127.0.0.1:30927'): " static_rule
             if [ -z "$static_rule" ]; then
-                static_rule='"/node-us" = "127.0.0.1:30927"'
+                static_rule='path = "/node-us"
+backend = "127.0.0.1:30927"'
             fi
             route_config="$static_rule"
             ;;
         *)
-            route_config='{ path = "/node-*", backend = "127.0.0.1:<port>" }'
+            route_config='path = "/node-*"
+backend = "127.0.0.1:<port>"'
             warn "无效选择，使用默认通配符模式"
             ;;
     esac
@@ -152,7 +158,7 @@ create_config() {
 listen_port = $listen_port
 
 [[routers]]
-  $route_config
+$route_config
 EOF
     info "配置已创建: $CONFIG_PATH"
 }
