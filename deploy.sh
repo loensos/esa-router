@@ -1,8 +1,28 @@
 #!/bin/bash
 # ESA Router 安装脚本 v1.5.2
-# 用法 (使用 GitHub API 避免 CDN 缓存):
+# 用法:
 #   curl -sL https://api.github.com/repos/loensos/esa-router/contents/deploy.sh -o deploy.sh
 #   bash deploy.sh
+
+# Self-update: ensure we have the latest deploy.sh
+SELF_UPDATE_URL="https://api.github.com/repos/loensos/esa-router/contents/deploy.sh"
+SELF_SCRIPT="$(realpath "$0" 2>/dev/null || echo "$0")"
+SELF_DIR="$(dirname "$SELF_SCRIPT")"
+SELF_NAME="$(basename "$SELF_SCRIPT")"
+
+# Only self-update if not being piped (i.e., user has saved the file)
+if [ -f "$SELF_SCRIPT" ] && [ "$SELF_NAME" != "bash" ]; then
+    LATEST_DEPLOY="/tmp/deploy-latest.sh"
+    if curl -sL "$SELF_UPDATE_URL" 2>/dev/null | python3 -c "import sys,json,base64; d=json.load(sys.stdin); print(base64.b64decode(d['content']).decode())" > "$LATEST_DEPLOY" 2>/dev/null; then
+        if [ -s "$LATEST_DEPLOY" ] && ! cmp -s "$LATEST_DEPLOY" "$SELF_SCRIPT"; then
+            echo "[INFO] Updating deploy.sh to latest version..."
+            cp "$LATEST_DEPLOY" "$SELF_SCRIPT"
+            chmod +x "$SELF_SCRIPT"
+            exec bash "$SELF_SCRIPT" "$@"
+        fi
+    fi
+    rm -f "$LATEST_DEPLOY"
+fi
 
 VERSION="1.5.2"
 REPO="loensos/esa-router"
