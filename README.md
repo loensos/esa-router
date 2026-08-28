@@ -1,4 +1,4 @@
-# ESA Router v1.5.1
+# ESA Router
 
 TCP 透传路由器：按 WebSocket 路径动态路由到不同后端，支持范围匹配和 TCP Keepalive。
 1、支持trojan+ws、vless+ws、vmess+ws等，落地协议不能配置tls。
