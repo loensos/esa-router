@@ -172,14 +172,14 @@ EOF
 
 install_service() {
     info "安装 systemd 服务..."
-    cat > /etc/systemd/system/$SERVICE_NAME.service << 'EOF'
+    cat > /etc/systemd/system/$SERVICE_NAME.service << EOF
 [Unit]
 Description=ESA Router - WebSocket Path Router
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=$SYMLINK_PATH $CONFIG_PATH
+ExecStart=$INSTALL_DIR/esa-router /etc/esa-router/config.toml
 Restart=always
 RestartSec=3
 StandardOutput=journal
