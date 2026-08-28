@@ -22,6 +22,7 @@ import (
 )
 
 const (
+	version   = "1.5.2"
 	connectTO = 10 * time.Second
 )
 
@@ -286,6 +287,7 @@ func (h *ConnectionHandler) Handle(conn net.Conn) {
 func main() {
 	log.SetFlags(log.Ltime | log.Lmsgprefix)
 	log.SetPrefix("[router] ")
+	log.Printf("ESA Router v%s starting...", version)
 
 	configPath := "/etc/esa-router/config.toml"
 	if len(os.Args) > 1 && !strings.HasPrefix(os.Args[1], "--") {
