@@ -151,7 +151,7 @@ create_config() {
 # ESA Router v1.5 配置
 listen_port = $listen_port
 
-[routers]
+[[routers]]
   $route_config
 EOF
     info "配置已创建: $CONFIG_PATH"
