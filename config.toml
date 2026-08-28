@@ -1,6 +1,25 @@
-# ESA Router v1.5 配置
 listen_port = 7826
 
-[routers]
-"/node-*" = "127.0.0.1:<port>"
-"/node-20001-30000" = "127.0.0.1:<port>"
+[[routers]]
+path = "/ws-us"
+backend = "127.0.0.1:2000"
+
+[[routers]]
+path = "/ws-sg"
+backend = "127.0.0.1:2001"
+
+[[routers]]
+path = "/node-*"
+backend = "127.0.0.1:<port>"
+
+[[routers]]
+path = "/node-"
+backend = "127.0.0.1:<port>"
+min_port = 20001
+max_port = 50000
+
+[[routers]]
+path = "/node-"
+backend = "127.0.0.1:<port>"
+min_port = 10000
+max_port = 19999

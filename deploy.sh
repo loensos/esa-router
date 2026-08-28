@@ -67,9 +67,19 @@ download_binary() {
         info "使用现有二进制: $BINARY_PATH"
         cp "$BINARY_PATH" "$BINARY_PATH.new"
     else
-        info "下载 ESA Router v$VERSION..."
-        local url="$GITHUB/$REPO/releases/download/v$VERSION/$BINARY_NAME"
-        curl -sL "$url" -o "$BINARY_PATH.new" || {
+        info "从 GitHub API 获取最新 Release..."
+        local api_url="$GITHUB/api/repos/$REPO/releases/latest"
+        local download_url=$(curl -sL "$api_url" | grep -o '"browser_download_url": "[^"]*' | grep "$BINARY_NAME" | cut -d'"' -f4 | head -1)
+        
+        if [ -z "$download_url" ]; then
+            # Fallback to versioned URL
+            download_url="$GITHUB/$REPO/releases/download/v$VERSION/$BINARY_NAME"
+            info "API 获取失败，使用版本化 URL: $download_url"
+        else
+            info "获取到下载链接: $download_url"
+        fi
+        
+        curl -sL "$download_url" -o "$BINARY_PATH.new" || {
             error "下载失败，请手动上传二进制文件"
         }
     fi
@@ -108,19 +118,21 @@ create_config() {
     echo ""
     echo "请选择路由模式:"
     echo "  1) 通配符模式 (/node-* 匹配所有端口)"
-    echo "  2) 范围模式 (/node-20001-30000 匹配指定范围)"
+    echo "  2) 范围模式 (指定端口范围，如 /node-20001-50000)"
     echo "  3) 静态模式 (/node-us -> 指定端口)"
     echo ""
     read -r -p "选择 [1-3]: " route_mode
 
     case $route_mode in
         1)
-            route_config='"/node-*" = "127.0.0.1:<port>"'
+            route_config='{ path = "/node-*", backend = "127.0.0.1:<port>" }'
             ;;
         2)
-            read -r -p "端口范围 (如 20001-30000) [20001-40000]: " range_input
-            range="${range_input:-20001-40000}"
-            route_config="\"/node-$range\" = \"127.0.0.1:<port>\""
+            read -r -p "端口范围起始 (如 20001) [20001]: " min_port_input
+            min_port="${min_port_input:-20001}"
+            read -r -p "端口范围结束 (如 50000) [50000]: " max_port_input
+            max_port="${max_port_input:-50000}"
+            route_config="{ path = \"/node-\", backend = \"127.0.0.1:<port>\", min_port = $min_port, max_port = $max_port }"
             ;;
         3)
             info "静态模式示例: /node-us = 127.0.0.1:30927"
@@ -131,7 +143,7 @@ create_config() {
             route_config="$static_rule"
             ;;
         *)
-            route_config='"/node-*" = "127.0.0.1:<port>"'
+            route_config='{ path = "/node-*", backend = "127.0.0.1:<port>" }'
             warn "无效选择，使用默认通配符模式"
             ;;
     esac
@@ -221,8 +233,14 @@ update_binary_only() {
 
 check_update() {
     info "检查最新版本..."
-    local latest_url="$GITHUB/$REPO/releases/latest/download/$BINARY_NAME"
-    local latest_hash=$(curl -sL "$latest_url" | md5sum | awk '{print $1}')
+    local api_url="$GITHUB/api/repos/$REPO/releases/latest"
+    local download_url=$(curl -sL "$api_url" | grep -o '"browser_download_url": "[^"]*' | grep "$BINARY_NAME" | cut -d'"' -f4 | head -1)
+    
+    if [ -z "$download_url" ]; then
+        download_url="$GITHUB/$REPO/releases/download/v$VERSION/$BINARY_NAME"
+    fi
+    
+    local latest_hash=$(curl -sL "$download_url" | md5sum | awk '{print $1}')
     local current_hash=$(md5sum "$BINARY_PATH" 2>/dev/null | awk '{print $1}' || echo "未安装")
     
     echo ""
@@ -260,64 +278,66 @@ configure_params() {
     if [ -f "$CONFIG_PATH" ]; then
         # 读取 [routers] 部分的路由
         while IFS= read -r line; do
-            # 匹配带引号的路由行
-            if [[ "$line" =~ ^[[:space:]]*\"[^\"]+\"[[:space:]]*=[[:space:]]*\"[^\"]+\" ]]; then
-                routes+=("$line")
-                route_count=$((route_count + 1))
-            fi
-        done < "$CONFIG_PATH"
-    fi
-
-    while true; do
-        echo ""
-        echo "路由列表 ($route_count 条):"
-        if [ $route_count -eq 0 ]; then
-            echo "  (空)"
-        else
-            for i in "${!routes[@]}"; do
-                echo "  $((i+1)). ${routes[$i]}"
-            done
-        fi
-        echo ""
-        echo "  1) 添加通配符路由 (/node-* 匹配所有端口)"
-        echo "  2) 添加范围路由 (/node-20001-30000)"
-        echo "  3) 添加静态路由 (/node-us -> 指定端口)"
-        echo "  4) 删除路由"
-        echo "  5) 完成并保存"
-        echo ""
-        read -r -p "选择 [1-5]: " route_action
-
-        case $route_action in
-            1)
-                routes+=('"/node-*" = "127.0.0.1:<port>"')
-                route_count=$((route_count + 1))
-                info "已添加: /node-*"
-                ;;
-            2)
-                read -r -p "端口范围 (如 20001-30000) [20001-40000]: " range_input
-                range="${range_input:-20001-40000}"
-                routes+=("\"/node-$range\" = \"127.0.0.1:<port>\"")
-                route_count=$((route_count + 1))
-                info "已添加: /node-$range"
-                ;;
-            3)
-                info "静态模式示例: /node-us = 127.0.0.1:30927"
-                read -r -p "请输入路由规则 (如 '/node-us' = '127.0.0.1:30927'): " static_rule
-                if [ -n "$static_rule" ]; then
-                    # 简单处理：自动添加双引号
-                    static_rule=$(echo "$static_rule" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-                    # 如果没有引号，自动添加
-                    if [[ "$static_rule" != *\"* ]]; then
-                        # 格式: /path = ip:port
-                        route_entry=$(echo "$static_rule" | sed 's|^[[:space:]]*\([^=]*[^[:space:]]\)[[:space:]]*=[[:space:]]*\(.*\)$|"\1" = "\2"|')
-                    else
-                        route_entry="$static_rule"
+                    # 匹配带引号的路由行 (旧格式) 或新 TOML 格式
+                    if [[ "$line" =~ ^[[:space:]]*\\\"[^\\\"]+\\\"[[:space:]]*=[[:space:]]*\\\"[^\\\"]+\\\" ]] || [[ "$line" =~ ^[[:space:]]*\{.*path.*backend.*\} ]]; then
+                        routes+=("$line")
+                        route_count=$((route_count + 1))
                     fi
-                    routes+=("$route_entry")
-                    route_count=$((route_count + 1))
-                    info "已添加: $route_entry"
+                done < "$CONFIG_PATH"
+            fi
+
+            while true; do
+                echo ""
+                echo "路由列表 ($route_count 条):"
+                if [ $route_count -eq 0 ]; then
+                    echo "  (空)"
+                else
+                    for i in "${!routes[@]}"; do
+                        echo "  $((i+1)). ${routes[$i]}"
+                    done
                 fi
-                ;;
+                echo ""
+                echo "  1) 添加通配符路由 (/node-* 匹配所有端口)"
+                echo "  2) 添加范围路由 (指定端口范围)"
+                echo "  3) 添加静态路由 (/node-us -> 指定端口)"
+                echo "  4) 删除路由"
+                echo "  5) 完成并保存"
+                echo ""
+                read -r -p "选择 [1-5]: " route_action
+
+                case $route_action in
+                    1)
+                        routes+=('{ path = "/node-*", backend = "127.0.0.1:<port>" }')
+                        route_count=$((route_count + 1))
+                        info "已添加: /node-*"
+                        ;;
+                    2)
+                        read -r -p "端口范围起始 (如 20001) [20001]: " min_port_input
+                        min_port="${min_port_input:-20001}"
+                        read -r -p "端口范围结束 (如 50000) [50000]: " max_port_input
+                        max_port="${max_port_input:-50000}"
+                        routes+=("{ path = \"/node-\", backend = \"127.0.0.1:<port>\", min_port = $min_port, max_port = $max_port }")
+                        route_count=$((route_count + 1))
+                        info "已添加: /node-$min_port-$max_port"
+                        ;;
+                    3)
+                        info "静态模式示例: /node-us = 127.0.0.1:30927"
+                        read -r -p "请输入路由规则 (如 '/node-us' = '127.0.0.1:30927'): " static_rule
+                        if [ -n "$static_rule" ]; then
+                            # 简单处理：自动添加双引号
+                            static_rule=$(echo "$static_rule" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                            # 如果没有引号，自动添加
+                            if [[ "$static_rule" != *\"* ]]; then
+                                # 格式: /path = ip:port
+                                route_entry=$(echo "$static_rule" | sed 's|^[[:space:]]*\([^=]*[^[:space:]]\)[[:space:]]*=[[:space:]]*\(.*\)$|"\1" = "\2"|')
+                            else
+                                route_entry="$static_rule"
+                            fi
+                            routes+=("$route_entry")
+                            route_count=$((route_count + 1))
+                            info "已添加: $route_entry"
+                        fi
+                        ;;
             4)
                 if [ $route_count -eq 0 ]; then
                     warn "没有可删除的路由"
@@ -347,9 +367,9 @@ configure_params() {
         echo "# ESA Router v1.5 配置"
         echo "listen_port = $listen_port"
         echo ""
-        echo "[routers]"
+        echo "[[routers]]"
         for route in "${routes[@]}"; do
-            echo "  $route"
+            echo "$route"
         done
     } > "$CONFIG_PATH"
     info "配置已更新: $CONFIG_PATH"

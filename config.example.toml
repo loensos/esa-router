@@ -1,18 +1,43 @@
-# ESA Router v1.2 配置示例
+# ESA Router v1.5 配置示例
 
 # 监听端口
-listen_port = 7825
+listen_port = 7826
 
-# 路由列表
-[routers]
+# 路由列表 - 使用数组格式
+[[routers]]
 # 静态路由
-"/ws-us" = "127.0.0.1:2000"
-"/ws-sg" = "127.0.0.1:2001"
+path = "/ws-us"
+backend = "127.0.0.1:2000"
 
-# 动态路由 - 端口提取
+[[routers]]
+path = "/ws-sg"
+backend = "127.0.0.1:2001"
+
+# 动态路由 - 通配符匹配所有端口
 # /node-2001 -> 127.0.0.1:2001
-"/node-*" = "127.0.0.1:<port>"
+# /node-9999 -> 127.0.0.1:9999
+[[routers]]
+path = "/node-*"
+backend = "127.0.0.1:<port>"
 
 # 动态路由 - 范围匹配
-# /node-2001 到 /node-3000 -> 127.0.0.1:2001-3000
-"/node-2001-3000" = "127.0.0.1:<port>"
+# /node-20001 到 /node-50000 -> 127.0.0.1:20001-50000
+# 支持自定义 min_port 和 max_port
+[[routers]]
+path = "/node-"
+backend = "127.0.0.1:<port>"
+min_port = 20001
+max_port = 50000
+
+# 动态路由 - 范围匹配 (另一个范围)
+# /node-10000 到 /node-19999 -> 127.0.0.1:10000-19999
+[[routers]]
+path = "/node-"
+backend = "127.0.0.1:<port>"
+min_port = 10000
+max_port = 19999
+
+# 优先级说明：
+# 1. 静态路由 (精确匹配) - 最高优先级
+# 2. 范围路由 (min_port - max_port) - 次高优先级
+# 3. 通配符路由 (*) - 最低优先级

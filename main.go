@@ -14,94 +14,98 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
-const connectTO = 10 * time.Second
+const (
+	connectTO = 10 * time.Second
+)
+
+type RouteType int
+
+const (
+	RouteTypeStatic RouteType = iota
+	RouteTypeRange
+	RouteTypeWildcard
+)
 
 type Route struct {
-	Pattern string
-	Backend string
-	Regex   *regexp.Regexp
+	Pattern  string
+	Backend  string
+	Type     RouteType
+	Regex    *regexp.Regexp
+	MinPort  int
+	MaxPort  int
 	Priority int
 }
 
-var (
-	routes      []Route
-	dynRoutes   []Route
-	listenPort  int
-)
+type Config struct {
+	ListenPort int         `toml:"listen_port"`
+	Routers    []RouteConfig `toml:"routers"`
+}
 
-func loadConfig() error {
-	configPath := "/etc/esa-router/config.toml"
-	if len(os.Args) > 1 {
-		configPath = os.Args[1]
+type RouteConfig struct {
+	Path    string `toml:"path"`
+	Backend string `toml:"backend"`
+	MinPort int    `toml:"min_port,omitempty"`
+	MaxPort int    `toml:"max_port,omitempty"`
+}
+
+type Router struct {
+	routes     []Route
+	listenPort int
+	mu         sync.RWMutex
+	activeConn int64
+	shutdown   atomic.Bool
+	wg         sync.WaitGroup
+}
+
+func NewRouter() *Router {
+	return &Router{
+		routes: make([]Route, 0),
 	}
+}
 
+func (r *Router) LoadConfig(configPath string) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return fmt.Errorf("read config: %w", err)
 	}
 
-	content := string(data)
-	listenPort = 7826
-	inRouters := false
+	var cfg Config
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("parse config: %w", err)
+	}
 
-	for _, line := range strings.Split(content, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.listenPort = cfg.ListenPort
+	if r.listenPort <= 0 {
+		r.listenPort = 7826
+	}
+
+	r.routes = make([]Route, 0, len(cfg.Routers))
+	for _, router := range cfg.Routers {
+		route, err := r.parseRouter(router)
+		if err != nil {
+			log.Printf("Warning: skip invalid router %s: %v", router.Path, err)
 			continue
 		}
+		r.routes = append(r.routes, route)
+	}
 
-		if strings.HasPrefix(line, "listen_port") {
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) == 2 {
-				port, err := strconv.Atoi(strings.TrimSpace(parts[1]))
-				if err == nil {
-					listenPort = port
-				}
-			}
-			continue
-		}
-
-		if line == "[routers]" {
-			inRouters = true
-			continue
-		}
-
-		if strings.HasPrefix(line, "[") && inRouters {
-			inRouters = false
-			continue
-		}
-
-		if inRouters && strings.Contains(line, "=") {
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) == 2 {
-				path := strings.TrimSpace(strings.Trim(parts[0], `"`))
-				backend := strings.TrimSpace(strings.Trim(parts[1], `"`))
-
-				route := Route{Pattern: path, Backend: backend, Priority: 2}
-
-				if strings.Contains(path, "*") {
-					route.Priority = 2
-				} else if strings.Count(path, "-") >= 2 {
-					route.Priority = 1
-					re := regexp.MustCompile(`^/node-(\d+)-(\d+)$`)
-					if m := re.FindStringSubmatch(path); m != nil {
-						route.Regex = re
-					}
-				} else if !strings.Contains(path, "*") {
-					route.Priority = 0
-					re := regexp.MustCompile("^" + regexp.QuoteMeta(path) + "$")
-					route.Regex = re
-				}
-
-				if route.Regex != nil {
-					routes = append(routes, route)
-				} else {
-					dynRoutes = append(dynRoutes, route)
-				}
+	// Sort by priority: static(0) > range(1) > wildcard(2)
+	// Same priority: longer pattern first
+	for i := 0; i < len(r.routes); i++ {
+		for j := i + 1; j < len(r.routes); j++ {
+			if r.routes[i].Priority > r.routes[j].Priority ||
+				(r.routes[i].Priority == r.routes[j].Priority && len(r.routes[i].Pattern) < len(r.routes[j].Pattern)) {
+				r.routes[i], r.routes[j] = r.routes[j], r.routes[i]
 			}
 		}
 	}
@@ -109,44 +113,104 @@ func loadConfig() error {
 	return nil
 }
 
-func findRoute(path string) (string, bool) {
+func (r *Router) parseRouter(router RouteConfig) (Route, error) {
+	path := strings.TrimSpace(router.Path)
+	backend := strings.TrimSpace(router.Backend)
+
+	if path == "" || backend == "" {
+		return Route{}, fmt.Errorf("empty path or backend")
+	}
+
+	route := Route{
+		Pattern: path,
+		Backend: backend,
+	}
+
+	// Check for range by min_port/max_port first
+	if router.MinPort > 0 || router.MaxPort > 0 {
+		route.Type = RouteTypeRange
+		route.Priority = 1
+		if router.MinPort > 0 {
+			route.MinPort = router.MinPort
+		} else {
+			route.MinPort = 20001
+		}
+		if router.MaxPort > 0 {
+			route.MaxPort = router.MaxPort
+		} else {
+			route.MaxPort = 30000
+		}
+		// Compile regex for port extraction from path like /node-25000
+		route.Regex = regexp.MustCompile(`^/node-(\d+)$`)
+	} else if strings.Contains(path, "*") {
+		route.Type = RouteTypeWildcard
+		route.Priority = 2
+	} else {
+		route.Type = RouteTypeStatic
+		route.Priority = 0
+		route.Regex = regexp.MustCompile("^" + regexp.QuoteMeta(path) + "$")
+	}
+
+	return route, nil
+}
+
+func (r *Router) FindRoute(path string) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	trimmed := strings.TrimPrefix(path, "/")
 
-	for _, r := range routes {
-		if r.Priority == 0 {
-			if r.Regex.MatchString(path) {
-				return r.Backend, true
+	for _, route := range r.routes {
+		switch route.Type {
+		case RouteTypeStatic:
+			if route.Regex.MatchString(path) {
+				return route.Backend, true
 			}
-		}
-	}
-
-	for _, r := range routes {
-		if r.Priority == 1 && r.Regex != nil {
-			if m := r.Regex.FindStringSubmatch(path); m != nil {
-				port, _ := strconv.Atoi(m[1])
-				if port >= 20001 && port <= 30000 {
-					return fmt.Sprintf("127.0.0.1:%s", m[1]), true
+		case RouteTypeRange:
+			if m := route.Regex.FindStringSubmatch(path); m != nil {
+				port, err := strconv.Atoi(m[1])
+				if err == nil && port >= route.MinPort && port <= route.MaxPort {
+					return fmt.Sprintf("127.0.0.1:%d", port), true
 				}
 			}
+		case RouteTypeWildcard:
+			if strings.Contains(route.Pattern, "*") {
+				return fmt.Sprintf("127.0.0.1:%s", trimmed), true
+			}
 		}
 	}
-
-	for _, r := range dynRoutes {
-		if strings.Contains(r.Pattern, "*") {
-			return fmt.Sprintf("127.0.0.1:%s", trimmed), true
-		}
-	}
-
 	return "", false
 }
 
-func copyConn(dst, src net.Conn, dir string, errChan chan<- error) {
+func (r *Router) GetListenPort() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.listenPort
+}
+
+func (r *Router) GetRoutesInfo() ([]Route, int) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	routesCopy := make([]Route, len(r.routes))
+	copy(routesCopy, r.routes)
+	return routesCopy, r.listenPort
+}
+
+func copyConn(dst, src net.Conn, errChan chan<- error) {
 	_, err := io.Copy(dst, src)
 	errChan <- err
 }
 
-func handle(conn net.Conn) {
-	// Enable TCP keepalive on client connection (toward ESA/CDN)
+type ConnectionHandler struct {
+	router *Router
+	wg     sync.WaitGroup
+}
+
+func NewConnectionHandler(router *Router) *ConnectionHandler {
+	return &ConnectionHandler{router: router}
+}
+
+func (h *ConnectionHandler) Handle(conn net.Conn) {
 	if tcpConn, ok := conn.(*net.TCPConn); ok {
 		tcpConn.SetKeepAlive(true)
 		tcpConn.SetKeepAlivePeriod(30 * time.Second)
@@ -187,16 +251,16 @@ func handle(conn net.Conn) {
 		path = string(pathBytes[:q])
 	}
 
-	backend, ok := findRoute(path)
+	backend, ok := h.router.FindRoute(path)
 	if !ok {
 		return
 	}
 
-	// 向 ESA/CDN 方向发送 Keepalive 探测，防止空闲断开
-	log.Printf("[breath] 向 ESA 探测: %s <- :1000 (30秒间隔)", remoteAddr)
+	log.Printf("[breath] 向 ESA 探测: %s <- :%d (30秒间隔)", remoteAddr, h.router.GetListenPort())
 
 	target, err := net.DialTimeout("tcp", backend, connectTO)
 	if err != nil {
+		log.Printf("Dial failed: %v", err)
 		return
 	}
 	defer target.Close()
@@ -205,34 +269,41 @@ func handle(conn net.Conn) {
 		return
 	}
 
-	c2b := make(chan error, 1)
-	b2c := make(chan error, 1)
+	errChan := make(chan error, 2)
+	go copyConn(target, conn, errChan)
+	go copyConn(conn, target, errChan)
 
-	go copyConn(target, conn, "C->B", c2b)
-	go copyConn(conn, target, "B->C", b2c)
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { c2b <- <-c2b; wg.Done() }()
-	go func() { b2c <- <-b2c; wg.Done() }()
-	wg.Wait()
+	h.wg.Add(2)
+	go func() { errChan <- <-errChan; h.wg.Done() }()
+	go func() { errChan <- <-errChan; h.wg.Done() }()
+	h.wg.Wait()
 }
 
 func main() {
 	log.SetFlags(log.Ltime | log.Lmsgprefix)
 	log.SetPrefix("[router] ")
 
+	configPath := "/etc/esa-router/config.toml"
+	if len(os.Args) > 1 && !strings.HasPrefix(os.Args[1], "--") {
+		configPath = os.Args[1]
+	}
+
+	router := NewRouter()
+	if err := router.LoadConfig(configPath); err != nil {
+		log.Fatalf("Load config failed: %v", err)
+	}
+
+	// Parse CLI args
+	listenPort := router.GetListenPort()
 	for i := 0; i < len(os.Args); i++ {
 		arg := os.Args[i]
 		if arg == "--port" && i+1 < len(os.Args) {
-			port, err := strconv.Atoi(os.Args[i+1])
-			if err == nil && port > 0 {
+			if port, err := strconv.Atoi(os.Args[i+1]); err == nil && port > 0 {
 				listenPort = port
 				i++
 			}
 		} else if strings.HasPrefix(arg, "--port=") {
-			port, err := strconv.Atoi(strings.TrimPrefix(arg, "--port="))
-			if err == nil && port > 0 {
+			if port, err := strconv.Atoi(strings.TrimPrefix(arg, "--port=")); err == nil && port > 0 {
 				listenPort = port
 			}
 		}
@@ -244,11 +315,18 @@ func main() {
 		}
 	}
 
-	if err := loadConfig(); err != nil {
-		log.Fatalf("Load config failed: %v", err)
+	routes, _ := router.GetRoutesInfo()
+	log.Printf("Loaded %d routes", len(routes))
+	for _, r := range routes {
+		switch r.Type {
+		case 0:
+			log.Printf("  %s -> %s (static)", r.Pattern, r.Backend)
+		case 1:
+			log.Printf("  %s -> %s (range %d-%d)", r.Pattern, r.Backend, r.MinPort, r.MaxPort)
+		case 2:
+			log.Printf("  %s -> %s (wildcard)", r.Pattern, r.Backend)
+		}
 	}
-
-	log.Printf("Loaded %d static routes, %d dynamic routes", len(routes), len(dynRoutes))
 
 	addr := fmt.Sprintf(":%d", listenPort)
 	lc := net.ListenConfig{
@@ -260,13 +338,6 @@ func main() {
 	}
 	log.Printf("Listening on %s", addr)
 
-	for _, r := range routes {
-		log.Printf("  %s -> %s (static)", r.Pattern, r.Backend)
-	}
-	for _, r := range dynRoutes {
-		log.Printf("  %s -> %s (dynamic)", r.Pattern, r.Backend)
-	}
-
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
@@ -275,15 +346,27 @@ func main() {
 		log.Fatal("Listener must be TCP")
 	}
 
+	handler := NewConnectionHandler(router)
+
+	// Shutdown handling
 	go func() {
 		for sig := range sigCh {
-			if sig == syscall.SIGHUP {
+			switch sig {
+			case syscall.SIGHUP:
 				log.Println("Reloading config...")
-				if err := loadConfig(); err != nil {
+				if err := router.LoadConfig(configPath); err != nil {
 					log.Printf("Reload failed: %v", err)
-					continue
+				} else {
+					log.Println("Config reloaded")
 				}
-				log.Printf("Reloaded %d static, %d dynamic routes", len(routes), len(dynRoutes))
+			case syscall.SIGINT, syscall.SIGTERM:
+				log.Println("Shutting down...")
+				router.shutdown.Store(true)
+				tcpLn.Close()
+				// Wait for active connections
+				handler.wg.Wait()
+				log.Println("Shutdown complete")
+				os.Exit(0)
 			}
 		}
 	}()
@@ -293,10 +376,13 @@ func main() {
 	for {
 		conn, err := tcpLn.AcceptTCP()
 		if err != nil {
+			if router.shutdown.Load() {
+				return
+			}
 			continue
 		}
 		conn.SetKeepAlive(true)
 		conn.SetKeepAlivePeriod(30 * time.Second)
-		go handle(conn)
+		go handler.Handle(conn)
 	}
 }
